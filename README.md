@@ -1,6 +1,9 @@
 # Vark - Simple LZAV Archive
 
-Vark is a minimal LZAV archive library and tool, designed for speed and simplicity. It uses the LZAV compression algorithm, which is fast and efficient. For more information about LZAV, see [LZAV on GitHub](https://github.com/avaneev/lzav).
+### Load stuff at DDR2 RAM speed!
+
+Vark is a minimal LZAV archive library and tool, designed for speed and simplicity. It uses the LZAV compression algorithm, which is fast and efficient.
+For more information about LZAV, see [LZAV on GitHub](https://github.com/avaneev/lzav).
 
 > NOTE: Vark is vide coded using Gemini AI, albeit closely instructed and architected by the author, who is a professional software engineer. Use at your own risk.
 
@@ -48,6 +51,22 @@ Usage:
   vark -l <archive>             List archive contents
   vark <archive>                Smart mode (Extract if .vark, Create/Append otherwise)
 ```
+## Build
+
+Vark uses CMake for building. 
+
+```bash
+# Configure the project
+cmake -S . -B build
+
+# Build the tool and tests
+cmake --build build --config Release
+
+# Run tests
+ctest --test-dir build -C Release
+```
+
+The build will produce `vark` (the CLI tool) and `vark_tests` (the test suite) in the build directory.
 
 ## License
 
