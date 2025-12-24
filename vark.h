@@ -105,6 +105,32 @@ struct VarkShardInfo
     const uint8_t* pCompressedData; // pointer to start of compressed chunks (mmap only, nullptr for FP)
 };
 
+// Simple RAII for conditional FILE* ownership
+struct VarkFP {
+    FILE* fp = nullptr;
+    bool owns = false;
+    VarkFP() = default;
+    VarkFP( FILE* f, bool own ) : fp(f), owns(own) {}
+    ~VarkFP() { if ( owns && fp ) fclose( fp ); }
+    operator FILE*() const { return fp; }
+    explicit operator bool() const { return fp != nullptr; }
+};
+
+// Acquires read FP from vark. Returns empty handle if MMAP mode.
+static VarkFP VarkAcquireReadFP( Vark& vark )
+{
+    if ( (vark.flags & VARK_MMAP) && vark.mmapHandle ) return {};
+    if ( (vark.flags & VARK_PERSISTENT_FP) && vark.fp ) return { vark.fp, false };
+    return { fopen( vark.path.string().c_str(), "rb" ), true };
+}
+
+// Acquires read/write FP from vark for append operations.
+static VarkFP VarkAcquireWriteFP( Vark& vark )
+{
+    if ( (vark.flags & VARK_PERSISTENT_FP) && vark.fp ) return { vark.fp, false };
+    return { fopen( vark.path.string().c_str(), "r+b" ), true };
+}
+
 // For MMAP: parses VSHF from memory, returns header. pOffsets points into mmap via tempShardBuffer copy.
 static bool VarkParseVSHF_MMAP( Vark& vark, const uint8_t* ptr, size_t entrySize, VarkShardInfo& out )
 {
@@ -361,11 +387,8 @@ void VarkCloseArchive( Vark& vark )
 bool VarkDecompressFile( Vark& vark, const std::string& file, std::vector< uint8_t >& data )
 {
     const VarkFile* entry = nullptr;
-    FILE* fp = nullptr;
-    std::vector< uint8_t >* pCompressedData = nullptr;
     uint64_t uncompressedSize = 0;
     uint64_t compressedSize = 0;
-    bool ownFP = false;
 
     if ( vark.flags & VARK_WRITE ) return false;
 
@@ -375,37 +398,36 @@ bool VarkDecompressFile( Vark& vark, const std::string& file, std::vector< uint8
 
     if ( entry->shardSize > 0 )
     {
-        if ( (vark.flags & VARK_MMAP) && vark.mmapHandle )
+        VarkFP fp = VarkAcquireReadFP( vark );
+        mio::mmap_source* mmap = (vark.flags & VARK_MMAP) ? (mio::mmap_source*)vark.mmapHandle : nullptr;
+        
+        VarkShardInfo hdr;
+        uint64_t dataStartPos = 0;
+        
+        if ( mmap )
         {
-            mio::mmap_source* mmap = (mio::mmap_source*)vark.mmapHandle;
             if ( !mmap->is_open() ) return false;
-
-            VarkShardInfo hdr;
             if ( !VarkParseVSHF_MMAP( vark, (const uint8_t*)mmap->data() + entry->offset, (size_t)entry->size, hdr ) ) return false;
-            return VarkDecompressShards( vark, nullptr, hdr, entry->shardSize, 0, 0, hdr.totalUncompressedSize, data );
         }
         else
         {
-            if ( (vark.flags & VARK_PERSISTENT_FP) && vark.fp ) fp = vark.fp;
-            else { fp = fopen( vark.path.string().c_str(), "rb" ); if ( !fp ) return false; ownFP = true; }
-
-            if ( VARK_FSEEK( fp, (long long)entry->offset, SEEK_SET ) != 0 ) goto error1;
-
-            VarkShardInfo hdr;
-            if ( !VarkParseVSHF_Fp( vark, fp, hdr ) ) goto error1;
-            if ( !VarkDecompressShards( vark, fp, hdr, entry->shardSize, VARK_FTELL( fp ), 0, hdr.totalUncompressedSize, data ) ) goto error1;
-
-            if ( ownFP ) fclose( fp );
-            return true;
+            if ( !fp ) return false;
+            if ( VARK_FSEEK( fp, (long long)entry->offset, SEEK_SET ) != 0 ) return false;
+            if ( !VarkParseVSHF_Fp( vark, fp, hdr ) ) return false;
+            dataStartPos = VARK_FTELL( fp );
         }
+        
+        return VarkDecompressShards( vark, fp, hdr, entry->shardSize, dataStartPos, 0, hdr.totalUncompressedSize, data );
     }
 
     if ( entry->size < 8 ) return false; 
     compressedSize = entry->size - 8;
 
-    if ( (vark.flags & VARK_MMAP) && vark.mmapHandle )
+    VarkFP fp = VarkAcquireReadFP( vark );
+    mio::mmap_source* mmap = (vark.flags & VARK_MMAP) ? (mio::mmap_source*)vark.mmapHandle : nullptr;
+
+    if ( mmap )
     {
-        mio::mmap_source* mmap = (mio::mmap_source*)vark.mmapHandle;
         if ( !mmap->is_open() ) return false;
         if ( entry->offset + 8 + compressedSize > mmap->size() ) return false;
 
@@ -421,36 +443,24 @@ bool VarkDecompressFile( Vark& vark, const std::string& file, std::vector< uint8
         return true;
     }
 
-    if ( (vark.flags & VARK_PERSISTENT_FP) && vark.fp ) fp = vark.fp;
-    else { fp = fopen( vark.path.string().c_str(), "rb" ); if ( !fp ) goto error0; ownFP = true; }
+    if ( !fp ) return false;
+    if ( VARK_FSEEK( fp, (long long)entry->offset, SEEK_SET ) != 0 ) return false;
+    if ( fread( &uncompressedSize, sizeof(uncompressedSize), 1, fp ) != 1 ) return false;
 
-    if ( VARK_FSEEK( fp, (long long)entry->offset, SEEK_SET ) != 0 ) goto error1;
-    if ( fread( &uncompressedSize, sizeof(uncompressedSize), 1, fp ) != 1 ) goto error1;
-
-    compressedSize = entry->size - 8;
-    pCompressedData = &vark.tempBuffer;
-    pCompressedData->resize( (size_t)compressedSize );
-    
+    vark.tempBuffer.resize( (size_t)compressedSize );
     if ( compressedSize > 0 )
     {
-        if ( fread( pCompressedData->data(), 1, (size_t)compressedSize, fp ) != compressedSize ) goto error1;
+        if ( fread( vark.tempBuffer.data(), 1, (size_t)compressedSize, fp ) != compressedSize ) return false;
     }
-
-    if ( ownFP ) fclose( fp );
 
     data.resize( (size_t)uncompressedSize );
     if ( uncompressedSize > 0 )
     {
-        int res = lzav::lzav_decompress( pCompressedData->data(), data.data(), (int)compressedSize, (int)uncompressedSize );
+        int res = lzav::lzav_decompress( vark.tempBuffer.data(), data.data(), (int)compressedSize, (int)uncompressedSize );
         if ( res < 0 || (uint64_t)res != uncompressedSize ) return false;
     }
 
     return true;
-
-error1:
-    if ( ownFP && fp ) fclose( fp );
-error0:
-    return false;
 }
 
 bool VarkDecompressFileSharded( Vark& vark, const std::string& file, uint64_t offset, uint64_t size, std::vector< uint8_t >& data )
@@ -464,48 +474,32 @@ bool VarkDecompressFileSharded( Vark& vark, const std::string& file, uint64_t of
 
     if ( entry->shardSize == 0 ) return false;
 
-    FILE* fp = nullptr;
-    bool ownFP = false;
+    VarkFP fp = VarkAcquireReadFP( vark );
+    mio::mmap_source* mmap = (vark.flags & VARK_MMAP) ? (mio::mmap_source*)vark.mmapHandle : nullptr;
 
-    if ( ( vark.flags & VARK_MMAP ) && vark.mmapHandle )
+    VarkShardInfo hdr;
+    uint64_t dataStartPos = 0;
+
+    if ( mmap )
     {
-        mio::mmap_source* mmap = ( mio::mmap_source* ) vark.mmapHandle;
         if ( !mmap->is_open() ) return false;
-
-        VarkShardInfo hdr;
-        if ( !VarkParseVSHF_MMAP( vark, ( const uint8_t* ) mmap->data() + entry->offset, (size_t)entry->size, hdr ) ) return false;
-        if ( offset + size > hdr.totalUncompressedSize ) return false;
-
-        return VarkDecompressShards( vark, nullptr, hdr, entry->shardSize, 0, offset, size, data );
+        if ( !VarkParseVSHF_MMAP( vark, (const uint8_t*)mmap->data() + entry->offset, (size_t)entry->size, hdr ) ) return false;
     }
     else
     {
-        if ( ( vark.flags & VARK_PERSISTENT_FP ) && vark.fp ) fp = vark.fp;
-        else { fp = fopen( vark.path.string().c_str(), "rb" ); if ( !fp ) return false; ownFP = true; }
-
-        if ( VARK_FSEEK( fp, ( long long ) entry->offset, SEEK_SET ) != 0 ) goto error1;
-
-        VarkShardInfo hdr;
-        if ( !VarkParseVSHF_Fp( vark, fp, hdr ) ) goto error1;
-        if ( offset + size > hdr.totalUncompressedSize ) goto error1;
-
-        uint64_t dataStartPos = VARK_FTELL( fp );
-        if ( !VarkDecompressShards( vark, fp, hdr, entry->shardSize, dataStartPos, offset, size, data ) ) goto error1;
-
-        if ( ownFP ) fclose( fp );
-        return true;
+        if ( !fp ) return false;
+        if ( VARK_FSEEK( fp, (long long)entry->offset, SEEK_SET ) != 0 ) return false;
+        if ( !VarkParseVSHF_Fp( vark, fp, hdr ) ) return false;
+        dataStartPos = VARK_FTELL( fp );
     }
 
-error1:
-    if ( ownFP && fp ) fclose( fp );
-    return false;
+    if ( offset + size > hdr.totalUncompressedSize ) return false;
+
+    return VarkDecompressShards( vark, fp, hdr, entry->shardSize, dataStartPos, offset, size, data );
 }
 
 bool VarkCompressAppendFile( Vark& vark, const std::string& file, uint32_t flags )
 {
-    FILE* srcFp = nullptr;
-    FILE* fp = nullptr;
-    std::vector< uint8_t > srcData;
     VarkFile newFile;
     long long srcLen = 0;
     uint64_t tableOffset = 0;
@@ -515,26 +509,29 @@ bool VarkCompressAppendFile( Vark& vark, const std::string& file, uint32_t flags
 
     if ( !( vark.flags & VARK_WRITE ) ) return false;
 
-    srcFp = fopen( file.c_str(), "rb" );
-    if ( !srcFp ) goto error0;
-
-    VARK_FSEEK( srcFp, 0, SEEK_END );
-    srcLen = VARK_FTELL( srcFp );
-    VARK_FSEEK( srcFp, 0, SEEK_SET );
-
-    srcData.resize( (size_t)srcLen );
-    if ( srcLen > 0 )
+    // Read source file
+    std::vector< uint8_t > srcData;
     {
-        if ( fread( srcData.data(), 1, (size_t)srcLen, srcFp ) != (size_t)srcLen ) goto error1;
-    }
-    fclose( srcFp );
+        VarkFP srcFp( fopen( file.c_str(), "rb" ), true );
+        if ( !srcFp ) return false;
 
-    if ( (vark.flags & VARK_PERSISTENT_FP) && vark.fp ) fp = vark.fp;
-    else { fp = fopen( vark.path.string().c_str(), "r+b" ); if ( !fp ) goto error0; }
+        VARK_FSEEK( srcFp, 0, SEEK_END );
+        srcLen = VARK_FTELL( srcFp );
+        VARK_FSEEK( srcFp, 0, SEEK_SET );
 
-    if ( VARK_FSEEK( fp, 4, SEEK_SET ) != 0 ) goto error2;
-    if ( fread( &tableOffset, sizeof(tableOffset), 1, fp ) != 1 ) goto error2;
-    if ( VARK_FSEEK( fp, (long long)tableOffset, SEEK_SET ) != 0 ) goto error2;
+        srcData.resize( (size_t)srcLen );
+        if ( srcLen > 0 )
+        {
+            if ( fread( srcData.data(), 1, (size_t)srcLen, srcFp ) != (size_t)srcLen ) return false;
+        }
+    } // srcFp closes automatically here
+    
+    VarkFP fp = VarkAcquireWriteFP( vark );
+    if ( !fp ) return false;
+
+    if ( VARK_FSEEK( fp, 4, SEEK_SET ) != 0 ) return false;
+    if ( fread( &tableOffset, sizeof(tableOffset), 1, fp ) != 1 ) return false;
+    if ( VARK_FSEEK( fp, (long long)tableOffset, SEEK_SET ) != 0 ) return false;
 
     newFile.offset = tableOffset;
     newFile.path = file;
@@ -583,13 +580,13 @@ bool VarkCompressAppendFile( Vark& vark, const std::string& file, uint32_t flags
         int bound = lzav::lzav_compress_bound( (int)srcLen );
         std::vector< uint8_t > dstData( bound );
         int compressedLen = lzav::lzav_compress_default( srcData.data(), dstData.data(), (int)srcLen, bound );
-        if ( compressedLen == 0 && srcLen > 0 ) goto error2;
+        if ( compressedLen == 0 && srcLen > 0 ) return false;
 
         uncompressedSize = (uint64_t)srcLen;
-        if ( fwrite( &uncompressedSize, sizeof(uncompressedSize), 1, fp ) != 1 ) goto error2;
+        if ( fwrite( &uncompressedSize, sizeof(uncompressedSize), 1, fp ) != 1 ) return false;
         if ( compressedLen > 0 )
         {
-            if ( fwrite( dstData.data(), 1, compressedLen, fp ) != (size_t)compressedLen ) goto error2;
+            if ( fwrite( dstData.data(), 1, compressedLen, fp ) != (size_t)compressedLen ) return false;
         }
         newFile.size = 8 + compressedLen;
     }
@@ -599,7 +596,7 @@ bool VarkCompressAppendFile( Vark& vark, const std::string& file, uint32_t flags
 
     newTableOffset = (uint64_t)VARK_FTELL( fp );
     count = vark.files.size();
-    if ( fwrite( &count, sizeof(count), 1, fp ) != 1 ) goto error2;
+    if ( fwrite( &count, sizeof(count), 1, fp ) != 1 ) return false;
 
     for ( const auto& f : vark.files )
     {
@@ -614,22 +611,13 @@ bool VarkCompressAppendFile( Vark& vark, const std::string& file, uint32_t flags
     fwrite( &count, sizeof(count), 1, fp );
     for ( const auto& f : vark.files ) fwrite( &f.shardSize, sizeof(uint32_t), 1, fp );
 
-    if ( VARK_FSEEK( fp, 4, SEEK_SET ) != 0 ) goto error2;
-    if ( fwrite( &newTableOffset, sizeof(newTableOffset), 1, fp ) != 1 ) goto error2;
+    if ( VARK_FSEEK( fp, 4, SEEK_SET ) != 0 ) return false;
+    if ( fwrite( &newTableOffset, sizeof(newTableOffset), 1, fp ) != 1 ) return false;
 
     VARK_FSEEK( fp, 0, SEEK_END );
     vark.size = (uint64_t)VARK_FTELL( fp );
 
-    if ( fp != vark.fp ) fclose( fp );
     return true;
-
-error2:
-    if ( fp != vark.fp ) fclose( fp );
-    return false;
-error1:
-    fclose( srcFp );
-error0:
-    return false;
 }
 
 #endif // VARK_IMPLEMENTATION
