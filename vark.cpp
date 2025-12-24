@@ -48,6 +48,18 @@ static void AddToFiles( std::vector<std::string>& files, const std::string& path
     }
 }
 
+static void ProcessFiles( Vark& vark, const std::vector<std::string>& files, const char* actionVerb )
+{
+    for ( const auto& f : files )
+    {
+        printf( "  %s: %s\n", actionVerb, f.c_str() );
+        if ( !VarkCompressAppendFile( vark, f ) )
+        {
+            printf( "Error: Failed to %s %s\n", actionVerb, f.c_str() );
+        }
+    }
+}
+
 void PrintUsage()
 {
     printf( "Usage:\n" );
@@ -135,14 +147,7 @@ int main( int argc, char** argv )
             return 1;
         }
 
-        for ( const auto& f : inputFiles )
-        {
-            printf( "  Adding: %s\n", f.c_str() );
-            if ( !VarkCompressAppendFile( vark, f ) )
-            {
-                printf( "Error: Failed to add %s\n", f.c_str() );
-            }
-        }
+        ProcessFiles( vark, inputFiles, "Adding" );
         VarkCloseArchive( vark );
     }
     else if ( mode == "-a" )
@@ -164,14 +169,7 @@ int main( int argc, char** argv )
             return 1;
         }
 
-        for ( const auto& f : inputFiles )
-        {
-            printf( "  Appending: %s\n", f.c_str() );
-            if ( !VarkCompressAppendFile( vark, f ) )
-            {
-                printf( "Error: Failed to append %s\n", f.c_str() );
-            }
-        }
+        ProcessFiles( vark, inputFiles, "Appending" );
         VarkCloseArchive( vark );
     }
     else if ( mode == "-x" )

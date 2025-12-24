@@ -424,4 +424,48 @@ UTEST( CLI, CreateListVerify )
     std::filesystem::remove( archive2 );
 }
 
+UTEST( CLI, DirectoryRecursion )
+{
+    const char* archive = "cli_recursive.vark";
+#ifdef _WIN32
+    const char* dir = "tests\\testa";
+#else
+    const char* dir = "tests/testa";
+#endif
+
+    // Create archive from directory
+    {
+        char* argv[] = { ( char* ) "vark", ( char* ) "-c", ( char* ) archive, ( char* ) dir };
+        ASSERT_EQ( 0, vark_test_main( 4, argv ) );
+    }
+
+    // Verify contents
+    Vark vark;
+    ASSERT_TRUE( VarkLoadArchive( vark, archive ) );
+    
+    bool foundA = false;
+    bool foundB = false;
+    bool foundC = false;
+
+    // Construct expected paths using std::filesystem::path to match system separators
+    std::string pathA = std::filesystem::path( "tests/testa/alice_in_wonderland.txt" ).make_preferred().string();
+    std::string pathB = std::filesystem::path( "tests/testa/testb/alice_in_wonderland.txt" ).make_preferred().string();
+    std::string pathC = std::filesystem::path( "tests/testa/testc/alice_in_wonderland.txt" ).make_preferred().string();
+    
+    for ( const auto& f : vark.files )
+    {
+        std::string s = f.path.string();
+        if ( s == pathA ) foundA = true;
+        if ( s == pathB ) foundB = true;
+        if ( s == pathC ) foundC = true;
+    }
+
+    ASSERT_TRUE( foundA );
+    ASSERT_TRUE( foundB );
+    ASSERT_TRUE( foundC );
+
+    VarkCloseArchive( vark );
+    std::filesystem::remove( archive );
+}
+
 UTEST_MAIN()
