@@ -20,18 +20,17 @@ For more information about LZAV, see [LZAV on GitHub](https://github.com/avaneev
 
 ## Performance
 
-* **CPU** AMD Ryzen Gen 3
-* **SSD** Samsung 970 Evo Plus M2
-* **Data Size:** 12.58 MB
+* **CPU** (Environment Dependent)
+* **Data Size:** 17.95 MB
 
 | Mode | Task | Latency | Throughput |
 | --- | --- | --- | --- |
-| **Normal** (Single-threaded) | Compression | 62.05 ms | 0.213 GB/s |
-|  | Decompression | 8.97 ms | 1.470 GB/s |
-| **Persistent** (FP + TempBuffer) | Decompression | 55.98 ms | 2.356 GB/s |
-| **Persistent** (MMAP) | **Decompression** | **21.51 ms** | **6.131 GB/s** |
-| **LZAV In-Memory** (Raw Ref) | Compression | 3.21 ms | 4.105 GB/s |
-|  | Decompression | 1.42 ms | 9.319 GB/s |
+| **Normal** (Single-threaded) | Compression | 59.69 ms | 0.315 GB/s |
+|  | Decompression | 15.40 ms | 1.223 GB/s |
+| **Persistent** (FP + TempBuffer) | Decompression | 91.38 ms | 2.060 GB/s |
+| **Persistent** (MMAP) | **Decompression** | **53.88 ms** | **3.494 GB/s** |
+| **LZAV In-Memory** (Raw Ref) | Compression | 23.37 ms | 0.806 GB/s |
+|  | Decompression | 4.72 ms | 3.986 GB/s |
 
 
 ## Usage
