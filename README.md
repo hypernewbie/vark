@@ -1,5 +1,7 @@
 # Vark - Simple LZAV Archive
 
+[![build](https://github.com/hypernewbie/vark/actions/workflows/build.yml/badge.svg)](https://github.com/hypernewbie/vark/actions/workflows/build.yml)
+
 ### Load stuff at DDR2 RAM speed!
 
 Vark is a minimal LZAV archive library and tool, designed for speed and simplicity. It uses the LZAV compression algorithm, which is fast and efficient.
