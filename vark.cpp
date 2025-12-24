@@ -48,12 +48,12 @@ static void AddToFiles( std::vector<std::string>& files, const std::string& path
     }
 }
 
-static void ProcessFiles( Vark& vark, const std::vector<std::string>& files, const char* actionVerb )
+static void ProcessFiles( Vark& vark, const std::vector<std::string>& files, const char* actionVerb, uint32_t flags = 0 )
 {
     for ( const auto& f : files )
     {
         printf( "  %s: %s\n", actionVerb, f.c_str() );
-        if ( !VarkCompressAppendFile( vark, f ) )
+        if ( !VarkCompressAppendFile( vark, f, flags ) )
         {
             printf( "Error: Failed to %s %s\n", actionVerb, f.c_str() );
         }
@@ -64,7 +64,9 @@ void PrintUsage()
 {
     printf( "Usage:\n" );
     printf( "  vark -c <archive> <files...>\tCreate archive\n" );
+    printf( "  vark -cs <archive> <files...>\tCreate archive (sharded compression)\n" );
     printf( "  vark -a <archive> <files...>\tAppend to archive\n" );
+    printf( "  vark -as <archive> <files...>\tAppend to archive (sharded)\n" );
     printf( "  vark -x <archive>\t\tExtract archive\n" );
     printf( "  vark -l <archive>\t\tList archive contents\n" );
     printf( "  vark -v <archive>\t\tVerify archive integrity\n" );
@@ -94,7 +96,7 @@ int main( int argc, char** argv )
 
     arg1 = argv[argIdx];
 
-    if ( arg1 == "-c" || arg1 == "-x" || arg1 == "-a" || arg1 == "-l" || arg1 == "-v" )
+    if ( arg1 == "-c" || arg1 == "-cs" || arg1 == "-x" || arg1 == "-a" || arg1 == "-as" || arg1 == "-l" || arg1 == "-v" )
     {
         mode = arg1;
         argIdx++;
@@ -132,7 +134,10 @@ int main( int argc, char** argv )
         AddToFiles( inputFiles, argv[argIdx] );
     }
 
-    if ( mode == "-c" )
+    uint32_t compressFlags = 0;
+    if ( mode == "-cs" || mode == "-as" ) compressFlags |= VARK_COMPRESS_SHARDED;
+
+    if ( mode == "-c" || mode == "-cs" )
     {
         if ( inputFiles.empty() )
         {
@@ -140,17 +145,17 @@ int main( int argc, char** argv )
             return 1;
         }
 
-        printf( "Creating archive: %s\n", archivePath.c_str() );
+        printf( "Creating archive%s: %s\n", ( mode == "-cs" ? " (sharded)" : "" ), archivePath.c_str() );
         if ( !VarkCreateArchive( vark, archivePath, VARK_WRITE | VARK_PERSISTENT_FP ) )
         {
             printf( "Error: Failed to create archive.\n" );
             return 1;
         }
 
-        ProcessFiles( vark, inputFiles, "Adding" );
+        ProcessFiles( vark, inputFiles, "Adding", compressFlags );
         VarkCloseArchive( vark );
     }
-    else if ( mode == "-a" )
+    else if ( mode == "-a" || mode == "-as" )
     {
         if ( inputFiles.empty() )
         {
@@ -169,7 +174,7 @@ int main( int argc, char** argv )
             return 1;
         }
 
-        ProcessFiles( vark, inputFiles, "Appending" );
+        ProcessFiles( vark, inputFiles, "Appending", compressFlags );
         VarkCloseArchive( vark );
     }
     else if ( mode == "-x" )
@@ -219,12 +224,32 @@ int main( int argc, char** argv )
         }
 
         printf( "Archive: %s (%llu bytes, %llu files)\n", archivePath.c_str(), vark.size, (uint64_t)vark.files.size() );
-        printf( "  Compressed Size  Original Path\n" );
-        printf( "  ---------------  -------------\n" );
+        printf( "  Compressed       Uncompressed     Ratio     Sharded   Path\n" );
+        printf( "  ---------------  ---------------  --------  --------  -------------\n" );
         for ( const auto& f : vark.files )
         {
-            printf( "  %15llu  %s\n", f.size, f.path.string().c_str() );
+            uint64_t uncompressedSize = 0;
+            if ( VarkFileSize( vark, f.path.string(), uncompressedSize ) )
+            {
+                double ratio = ( 1.0 - ( double ) f.size / ( double ) uncompressedSize ) * 100.0;
+                printf( "  %15llu  %15llu  %7.1f%%  %8s  %s\n",
+                    f.size,
+                    uncompressedSize,
+                    ratio,
+                    ( f.shardSize > 0 ? "\xe2\x9c\x93" : " " ),
+                    f.path.string().c_str() );
+            }
+            else
+            {
+                printf( "  %15llu  %15s  %7s  %8s  %s\n",
+                    f.size,
+                    "ERROR",
+                    "N/A",
+                    ( f.shardSize > 0 ? "\xe2\x9c\x93" : " " ),
+                    f.path.string().c_str() );
+            }
         }
+        VarkCloseArchive( vark );
     }
     else if ( mode == "-v" )
     {

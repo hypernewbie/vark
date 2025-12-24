@@ -532,6 +532,82 @@ UTEST( CLI, DirectoryRecursion )
     std::filesystem::remove( archive );
 }
 
+UTEST( CLI, ShardedCompression )
+{
+    const char* archivePath = "clisharded.vark";
+    const char* secondArchivePath = "clistandard.vark";
+    const char* largeFile = "tests/Apophysis-250901-101.png";
+    const char* smallFile = "tests/alice_in_wonderland.txt";
+
+    // Step 2: Test Create with Sharded Flag (-cs)
+    {
+        char* argv[] = { ( char* ) "vark", ( char* ) "-cs", ( char* ) archivePath, ( char* ) largeFile };
+        ASSERT_EQ( 0, vark_test_main( 4, argv ) );
+        ASSERT_TRUE( std::filesystem::exists( archivePath ) );
+    }
+
+    // Step 3: Test Append with Sharded Flag (-as)
+    {
+        char* argv[] = { ( char* ) "vark", ( char* ) "-as", ( char* ) archivePath, ( char* ) smallFile };
+        ASSERT_EQ( 0, vark_test_main( 4, argv ) );
+    }
+
+    // Step 4: Verify Sharded Archive (Both files should be sharded)
+    {
+        Vark vark;
+        ASSERT_TRUE( VarkLoadArchive( vark, archivePath ) );
+        ASSERT_EQ( ( size_t ) 2, vark.files.size() );
+
+        bool foundLarge = false;
+        bool foundSmall = false;
+
+        for ( const auto& f : vark.files )
+        {
+            std::string path = f.path.generic_string();
+            if ( path == largeFile )
+            {
+                foundLarge = true;
+                ASSERT_GT( f.shardSize, ( uint32_t ) 0 );
+            }
+            else if ( path == smallFile )
+            {
+                foundSmall = true;
+                ASSERT_GT( f.shardSize, ( uint32_t ) 0 ); // Should be sharded because we used -as
+            }
+        }
+
+        ASSERT_TRUE( foundLarge );
+        ASSERT_TRUE( foundSmall );
+        VarkCloseArchive( vark );
+    }
+
+    // Step 5: Test Create with Standard Flag (-c)
+    {
+        char* argv[] = { ( char* ) "vark", ( char* ) "-c", ( char* ) secondArchivePath, ( char* ) smallFile };
+        ASSERT_EQ( 0, vark_test_main( 4, argv ) );
+        ASSERT_TRUE( std::filesystem::exists( secondArchivePath ) );
+    }
+
+    // Step 6: Verify Standard Compression Archive
+    {
+        Vark vark;
+        ASSERT_TRUE( VarkLoadArchive( vark, secondArchivePath ) );
+        ASSERT_EQ( ( size_t ) 1, vark.files.size() );
+        ASSERT_EQ( ( uint32_t ) 0, vark.files[0].shardSize );
+        VarkCloseArchive( vark );
+    }
+
+    // Step 7: Test List Output Calls Successfully
+    {
+        char* argv[] = { ( char* ) "vark", ( char* ) "-l", ( char* ) archivePath };
+        ASSERT_EQ( 0, vark_test_main( 3, argv ) );
+    }
+
+    // Step 8: Cleanup
+    std::filesystem::remove( archivePath );
+    std::filesystem::remove( secondArchivePath );
+}
+
 UTEST( Vark, ShardedCompression )
 {
     const std::string archivePath = "sharded_test.vark";
