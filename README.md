@@ -20,17 +20,21 @@ For more information about LZAV, see [LZAV on GitHub](https://github.com/avaneev
 
 ## Performance
 
-* **CPU** (Environment Dependent)
-* **Data Size:** 12.58 MB
+* **CPU** AMD Ryzen Gen 3
+* **SSD** Samsung 970 Evo Plus M2
+* **Test Data:** 12.58 MB (Mixed File Types)
+* **Sharded Test Data:** 9.02 MB (PNG File)
 
-| Mode | Task | Latency | Throughput |
-| --- | --- | --- | --- |
-| **Normal** (Single-threaded) | Compression | 27.14 ms | 0.486 GB/s |
-|  | Decompression | 7.81 ms | 1.689 GB/s |
-| **Persistent** (FP + TempBuffer) | Decompression | 51.74 ms | 2.549 GB/s |
-| **Persistent** (MMAP) | **Decompression** | **20.33 ms** | **6.486 GB/s** |
-| **LZAV In-Memory** (Raw Ref) | Compression | 2.79 ms | 4.721 GB/s |
-|  | Decompression | 1.32 ms | 10.013 GB/s |
+| Mode | Task | Throughput |
+| --- | --- | --- |
+| **Normal** (Single-threaded) | Compression | 0.486 GB/s |
+|  | Decompression | 1.689 GB/s |
+| **Persistent** (FP + TempBuffer) | Decompression | 2.549 GB/s |
+| **Persistent** (MMAP) | **Decompression** | **6.486 GB/s** |
+| **LZAV In-Memory** (Raw Ref) | Compression | 4.721 GB/s |
+|  | Decompression | 10.013 GB/s |
+| **Sharded** (MMAP) | Random 4KB Read | 1.037 GB/s |
+|  | **Sequential 256KB Read** | **16.215 GB/s** |
 
 
 ## Usage

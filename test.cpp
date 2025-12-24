@@ -789,4 +789,102 @@ UTEST( Vark, ShardedApiOnNonSharded )
     std::filesystem::remove( normalFile );
 }
 
+// Helper for Sharded Perf Tests
+bool RunShardedPerfTest( const std::string& testName, const std::string& filePath, bool randomAccess )
+{
+    const std::string archivePath = "perf_" + testName + ".vark";
+    
+    // Ensure file exists
+    if ( !std::filesystem::exists( filePath ) ) {
+        printf( "[%s] Skipped: %s not found\n", testName.c_str(), filePath.c_str() );
+        return true; 
+    }
+    
+    uint64_t fileSize = std::filesystem::file_size( filePath );
+
+    // Create Archive
+    Vark vark;
+    if( !VarkCreateArchive( vark, archivePath, VARK_WRITE ) ) return false;
+    if( !VarkCompressAppendFile( vark, filePath, VARK_COMPRESS_SHARDED ) ) return false;
+    VarkCloseArchive( vark );
+
+    // Load
+    Vark varkLoaded;
+    if( !VarkLoadArchive( varkLoaded, archivePath, VARK_MMAP ) ) return false; // Use MMAP for best read perf
+
+    std::vector<uint8_t> buffer;
+    auto start = std::chrono::high_resolution_clock::now();
+    uint64_t bytesProcessed = 0;
+
+    if ( randomAccess )
+    {
+        // Random 4KB reads
+        // 4KB is a common page size / texture block size
+        const int iterations = 10000;
+        const int readSize = 4096;
+        srand( 12345 );
+        
+        for( int i=0; i<iterations; ++i )
+        {
+            uint64_t maxOffset = (fileSize > readSize) ? fileSize - readSize : 0;
+            uint64_t offset = rand() % ( maxOffset + 1 );
+            
+            if( !VarkDecompressFileSharded( varkLoaded, filePath, offset, readSize, buffer ) ) {
+                 return false;
+            }
+            bytesProcessed += readSize;
+        }
+    }
+    else
+    {
+        // Sequential 256KB chunks
+        // Simulates streaming a video or large asset
+        const int chunkSize = 256 * 1024;
+        
+        // Loop enough times to get a stable measurement (at least ~100MB processed)
+        int iterations = 1;
+        if ( fileSize < 100 * 1024 * 1024 ) {
+            iterations = (int)( ( 100 * 1024 * 1024 ) / fileSize ) + 1;
+        }
+        
+        for( int i=0; i<iterations; ++i )
+        {
+            uint64_t offset = 0;
+            while( offset < fileSize )
+            {
+                uint64_t thisChunk = chunkSize;
+                if ( offset + thisChunk > fileSize ) thisChunk = fileSize - offset;
+                
+                if( !VarkDecompressFileSharded( varkLoaded, filePath, offset, thisChunk, buffer ) ) {
+                    return false;
+                }
+                offset += thisChunk;
+                bytesProcessed += thisChunk;
+            }
+        }
+    }
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> timeSec = end - start;
+    double gb = (double)bytesProcessed / (1000.0 * 1000.0 * 1000.0);
+    
+    printf( "%-25s: %.2f ms (%.3f GB/sec)\n", testName.c_str(), timeSec.count() * 1000.0, gb / timeSec.count() );
+
+    VarkCloseArchive( varkLoaded );
+    std::filesystem::remove( archivePath );
+    return true;
+}
+
+UTEST( Vark, PerfShardedRandom )
+{
+    printf("\n[ Sharded Performance (MMAP) ]\n");
+    // "tests/Apophysis-250901-101.png" is ~9MB, good candidate
+    ASSERT_TRUE( RunShardedPerfTest( "RandomRead_4KB", "tests/Apophysis-250901-101.png", true ) );
+}
+
+UTEST( Vark, PerfShardedSequential )
+{
+    ASSERT_TRUE( RunShardedPerfTest( "Sequential_256KB", "tests/Apophysis-250901-101.png", false ) );
+}
+
 UTEST_MAIN()
