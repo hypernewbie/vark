@@ -55,10 +55,15 @@ void PrintUsage()
     printf( "  vark -a <archive> <files...>\tAppend to archive\n" );
     printf( "  vark -x <archive>\t\tExtract archive\n" );
     printf( "  vark -l <archive>\t\tList archive contents\n" );
+    printf( "  vark -v <archive>\t\tVerify archive integrity\n" );
     printf( "  vark <archive>\t\tSmart mode (Extract if .vark, Create/Append otherwise)\n" );
 }
 
+#ifdef VARK_UNIT_TEST_MODE
+int vark_test_main( int argc, char** argv )
+#else // !VARK_UNIT_TEST_MODE
 int main( int argc, char** argv )
+#endif // VARK_UNIT_TEST_MODE
 {
     std::string mode = "";
     std::string archivePath;
@@ -77,7 +82,7 @@ int main( int argc, char** argv )
 
     arg1 = argv[argIdx];
 
-    if ( arg1 == "-c" || arg1 == "-x" || arg1 == "-a" || arg1 == "-l" )
+    if ( arg1 == "-c" || arg1 == "-x" || arg1 == "-a" || arg1 == "-l" || arg1 == "-v" )
     {
         mode = arg1;
         argIdx++;
@@ -170,7 +175,7 @@ int main( int argc, char** argv )
     else if ( mode == "-x" )
     {
         printf( "Extracting archive: %s\n", archivePath.c_str() );
-        if ( !VarkLoadArchive( vark, archivePath, VARK_MMAP ) )
+        if ( !VarkLoadArchive( vark, archivePath, VARK_MMAP | VARK_PERSISTENT_TEMPBUFFER ) )
         {
             printf( "Error: Failed to load archive.\n" );
             return 1;
@@ -183,6 +188,7 @@ int main( int argc, char** argv )
             std::vector<uint8_t> data;
             if ( VarkDecompressFile( vark, file.path.string(), data ) )
             {
+                fs::create_directories( file.path.parent_path() );
                 FILE* out = fopen( file.path.string().c_str(), "wb" );
                 if ( out )
                 {
@@ -216,6 +222,53 @@ int main( int argc, char** argv )
         for ( const auto& f : vark.files )
         {
             printf( "  %15llu  %s\n", f.size, f.path.string().c_str() );
+        }
+    }
+    else if ( mode == "-v" )
+    {
+        uint32_t failCount = 0;
+
+        if ( !VarkLoadArchive( vark, archivePath, VARK_MMAP | VARK_PERSISTENT_TEMPBUFFER ) )
+        {
+            printf( "Error: Failed to load archive %s\n", archivePath.c_str() );
+            return 1;
+        }
+
+        printf( "Verifying archive: %s\n", archivePath.c_str() );
+        for ( const auto& file : vark.files )
+        {
+            std::vector<uint8_t> data;
+            uint64_t hash = 0;
+            printf( "  %s... ", file.path.string().c_str() );
+            if ( VarkDecompressFile( vark, file.path.string(), data ) )
+            {
+                hash = VarkHash( data.data(), data.size() );
+                if ( hash == file.hash )
+                {
+                    printf( "OK\n" );
+                }
+                else
+                {
+                    printf( "FAILED (Hash mismatch)\n" );
+                    failCount++;
+                }
+            }
+            else
+            {
+                printf( "FAILED (Decompression error)\n" );
+                failCount++;
+            }
+        }
+        VarkCloseArchive( vark );
+
+        if ( failCount == 0 )
+        {
+            printf( "\nIntegrity check PASSED.\n" );
+        }
+        else
+        {
+            printf( "\nIntegrity check FAILED (%u errors found).\n", failCount );
+            return 1;
         }
     }
     else
