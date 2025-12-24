@@ -673,12 +673,12 @@ UTEST( Vark, ShardedEdgeCases )
         std::vector<uint8_t> data;
         ASSERT_TRUE( VarkDecompressFile( varkLoaded, smallFile, data ) );
         std::string s( data.begin(), data.end() );
-        ASSERT_EQ( std::string("Small text file"), s );
+        ASSERT_STREQ( "Small text file", s.c_str() );
         
         // Partial on small
         ASSERT_TRUE( VarkDecompressFileSharded( varkLoaded, smallFile, 0, 5, data ) );
         s = std::string( data.begin(), data.end() );
-        ASSERT_EQ( std::string("Small"), s );
+        ASSERT_STREQ( "Small", s.c_str() );
     }
 
     // Verify Exact (1 shard boundary)

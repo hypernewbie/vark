@@ -1,19 +1,22 @@
 # Vark - Simple LZAV Archive
 
 [![build](https://github.com/hypernewbie/vark/actions/workflows/build.yml/badge.svg)](https://github.com/hypernewbie/vark/actions/workflows/build.yml)
+[![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/hypernewbie/vark/releases/download/v1.02/vark-windows-v1.02.zip) [![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/hypernewbie/vark/releases/download/v1.02/vark-linux-v1.02.zip) [![macOS](https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/hypernewbie/vark/releases/download/v1.02/vark-macos-v1.02.zip)
 
 ### Load stuff at DDR2 RAM speed!
 
 Vark is a minimal LZAV archive library and tool, designed for speed and simplicity. It uses the LZAV compression algorithm, which is fast and efficient.
 For more information about LZAV, see [LZAV on GitHub](https://github.com/avaneev/lzav).
 
-> NOTE: Vark is vide coded using Gemini AI, albeit closely instructed and architected by the author, who is a professional software engineer. Use at your own risk.
+> NOTE: Vark is vibe coded using Gemini AI, albeit closely instructed and architected by the author, who is a professional software engineer. Use at your own risk.
 
 ## Features
 
-- Simple C++ interface
+- Simple C-style C++ interface
 - Fast LZAV compression and decompression
 - Minimal archive format
+- Sharded compression support for fast partial reads
+- Memory-Mapped I/O support (MMAP)
 
 ## Performance
 
@@ -45,20 +48,27 @@ For more information about LZAV, see [LZAV on GitHub](https://github.com/avaneev
 Vark vark;
 
 // Create a new archive
-VarkCreateArchive(vark, "data.vark", VARK_WRITE);
+VarkCreateArchive( vark, "data.vark", VARK_WRITE );
 
 // Append a file
-VarkCompressAppendFile(vark, "file.txt");
+VarkCompressAppendFile( vark, "file.txt" );
+
+// Append a file with sharded compression (optimized for random access)
+VarkCompressAppendFile( vark, "large_asset.dat", VARK_COMPRESS_SHARDED );
 
 // Load an existing archive for reading
-VarkLoadArchive(vark, "data.vark", VARK_MMAP);
+VarkLoadArchive( vark, "data.vark", VARK_MMAP );
 
-// Decompress a file
+// Decompress a full file
 std::vector<uint8_t> data;
-VarkDecompressFile(vark, "file.txt", data);
+VarkDecompressFile( vark, "file.txt", data );
+
+// Partially decompress a sharded file (e.g., read 1KB at offset 512)
+// This is significantly faster for large files as it only decodes necessary shards
+VarkDecompressFileSharded( vark, "large_asset.dat", 512, 1024, data );
 
 // Always close when done
-VarkCloseArchive(vark);
+VarkCloseArchive( vark );
 ```
 
 #### Flags

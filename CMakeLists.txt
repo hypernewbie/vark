@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(MSVC)
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+else()
+  add_compile_options(-Wno-format -Wno-unused-result)
 endif()
 
 # Header-only library target (optional, but good practice)
