@@ -447,10 +447,11 @@ UTEST( CLI, DirectoryRecursion )
     bool foundB = false;
     bool foundC = false;
 
-    // Construct expected paths using std::filesystem::path to match system separators
-    std::string pathA = std::filesystem::path( "tests/testa/alice_in_wonderland.txt" ).make_preferred().string();
-    std::string pathB = std::filesystem::path( "tests/testa/testb/alice_in_wonderland.txt" ).make_preferred().string();
-    std::string pathC = std::filesystem::path( "tests/testa/testc/alice_in_wonderland.txt" ).make_preferred().string();
+    // Vark ALWAYS stores paths with forward slashes (generic format)
+    // regardless of the platform's preferred separator.
+    std::string pathA = "tests/testa/alice_in_wonderland.txt";
+    std::string pathB = "tests/testa/testb/alice_in_wonderland.txt";
+    std::string pathC = "tests/testa/testc/alice_in_wonderland.txt";
     
     for ( const auto& f : vark.files )
     {

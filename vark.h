@@ -411,7 +411,7 @@ bool VarkCompressAppendFile( Vark& vark, const std::string& file )
 
     for ( const auto& f : vark.files )
     {
-        VarkWriteString( fp, f.path.string() );
+        VarkWriteString( fp, f.path.generic_string<char>() );
         fwrite( &f.offset, sizeof(f.offset), 1, fp );
         fwrite( &f.size, sizeof(f.size), 1, fp );
         fwrite( &f.hash, sizeof(f.hash), 1, fp );
