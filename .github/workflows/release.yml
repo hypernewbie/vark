@@ -1,0 +1,61 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            artifact_name: vark
+            suffix: linux
+          - os: windows-latest
+            artifact_name: vark.exe
+            suffix: windows
+          - os: macos-latest
+            artifact_name: vark
+            suffix: macos
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure CMake
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build
+      run: cmake --build build --config Release
+
+    - name: Run Tests
+      run: ctest --test-dir build -C Release --output-on-failure
+
+    - name: Package (Unix)
+      if: runner.os != 'Windows'
+      run: |
+        cd build
+        zip ../vark-${{ matrix.suffix }}-${{ github.ref_name }}.zip ${{ matrix.artifact_name }}
+
+    - name: Package (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        # Handle cases where multi-config generators (like VS) put the binary in a 'Release' subfolder
+        $binPath = "build/${{ matrix.artifact_name }}"
+        if (!(Test-Path $binPath)) { $binPath = "build/Release/${{ matrix.artifact_name }}" }
+        Compress-Archive -Path $binPath -DestinationPath "vark-${{ matrix.suffix }}-${{ github.ref_name }}.zip"
+
+    - name: Upload Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: vark-${{ matrix.suffix }}-${{ github.ref_name }}.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
