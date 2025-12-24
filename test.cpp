@@ -375,6 +375,68 @@ UTEST( Vark, NegativeTests )
     remove( path.c_str() );
 }
 
+UTEST( Vark, FileSizeTest )
+{
+    const std::string archivePath = "filesize_test.vark";
+    Vark vark;
+    ASSERT_TRUE( VarkCreateArchive( vark, archivePath, VARK_WRITE ) );
+
+    // Add regular file
+    ASSERT_TRUE( VarkCompressAppendFile( vark, "tests/alice_in_wonderland.txt" ) );
+    
+    // Add sharded file
+    ASSERT_TRUE( VarkCompressAppendFile( vark, "tests/swoosh_1.wav", VARK_COMPRESS_SHARDED ) );
+    
+    VarkCloseArchive( vark );
+
+    // Get expected sizes
+    uint64_t sizeAlice = std::filesystem::file_size( "tests/alice_in_wonderland.txt" );
+    uint64_t sizeWav = std::filesystem::file_size( "tests/swoosh_1.wav" );
+    uint64_t outSize = 0;
+
+    // Test 1: Normal Mode (File Pointer)
+    {
+        Vark varkRead;
+        ASSERT_TRUE( VarkLoadArchive( varkRead, archivePath ) );
+        
+        ASSERT_TRUE( VarkFileSize( varkRead, "tests/alice_in_wonderland.txt", outSize ) );
+        ASSERT_EQ( sizeAlice, outSize );
+        
+        ASSERT_TRUE( VarkFileSize( varkRead, "tests/swoosh_1.wav", outSize ) );
+        ASSERT_EQ( sizeWav, outSize );
+        
+        ASSERT_FALSE( VarkFileSize( varkRead, "nonexistent.txt", outSize ) );
+    }
+
+    // Test 2: MMAP Mode
+    {
+        Vark varkMap;
+        ASSERT_TRUE( VarkLoadArchive( varkMap, archivePath, VARK_MMAP ) );
+        
+        ASSERT_TRUE( VarkFileSize( varkMap, "tests/alice_in_wonderland.txt", outSize ) );
+        ASSERT_EQ( sizeAlice, outSize );
+        
+        ASSERT_TRUE( VarkFileSize( varkMap, "tests/swoosh_1.wav", outSize ) );
+        ASSERT_EQ( sizeWav, outSize );
+        VarkCloseArchive( varkMap );
+    }
+
+    // Test 3: Persistent FP Mode
+    {
+        Vark varkPersist;
+        ASSERT_TRUE( VarkLoadArchive( varkPersist, archivePath, VARK_PERSISTENT_FP ) );
+        
+        ASSERT_TRUE( VarkFileSize( varkPersist, "tests/alice_in_wonderland.txt", outSize ) );
+        ASSERT_EQ( sizeAlice, outSize );
+        
+        ASSERT_TRUE( VarkFileSize( varkPersist, "tests/swoosh_1.wav", outSize ) );
+        ASSERT_EQ( sizeWav, outSize );
+        VarkCloseArchive( varkPersist );
+    }
+    
+    std::filesystem::remove( archivePath );
+}
+
 UTEST( CLI, Help )
 {
     char* argv[] = { ( char* ) "vark" };

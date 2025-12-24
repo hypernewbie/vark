@@ -75,6 +75,9 @@ bool VarkDecompressFile( Vark& vark, const std::string& file, std::vector< uint8
 // Partially decompress a sharded file from the archive into a vector of bytes. Returns false if the file is not sharded.
 bool VarkDecompressFileSharded( Vark& vark, const std::string& file, uint64_t offset, uint64_t size, std::vector< uint8_t >& data );
 
+// Get the uncompressed size of a file in the archive without decompressing it.
+bool VarkFileSize( Vark& vark, const std::string& file, uint64_t& outSize );
+
 // Compress a file and append it to the archive.
 // flags: VARK_COMPRESS_SHARDED (0x1) - Experimental sharded compression
 bool VarkCompressAppendFile( Vark& vark, const std::string& file, uint32_t flags = 0 );
@@ -496,6 +499,72 @@ bool VarkDecompressFileSharded( Vark& vark, const std::string& file, uint64_t of
     if ( offset + size > hdr.totalUncompressedSize ) return false;
 
     return VarkDecompressShards( vark, fp, hdr, entry->shardSize, dataStartPos, offset, size, data );
+}
+
+bool VarkFileSize( Vark& vark, const std::string& file, uint64_t& outSize )
+{
+    if ( vark.flags & VARK_WRITE ) return false;
+
+    auto it = vark.fileLookup.find( std::filesystem::path( file ).generic_string() );
+    if ( it == vark.fileLookup.end() ) return false;
+    const VarkFile* entry = &vark.files[it->second];
+
+    if ( entry->shardSize > 0 )
+    {
+        // Sharded File: Header is VSHF(4) + Count(4) + Size(8)
+        if ( entry->size < 16 ) return false;
+
+        if ( (vark.flags & VARK_MMAP) && vark.mmapHandle )
+        {
+             mio::mmap_source* mmap = (mio::mmap_source*)vark.mmapHandle;
+             if ( !mmap->is_open() ) return false;
+             if ( entry->offset + 16 > mmap->size() ) return false; // Basic bounds check for header
+
+             const uint8_t* ptr = (const uint8_t*)mmap->data() + entry->offset;
+             if ( memcmp( ptr, "VSHF", 4 ) != 0 ) return false;
+             memcpy( &outSize, ptr + 8, 8 );
+             return true;
+        }
+        else
+        {
+             VarkFP fp = VarkAcquireReadFP( vark );
+             if ( !fp ) return false;
+             if ( VARK_FSEEK( fp, (long long)entry->offset, SEEK_SET ) != 0 ) return false;
+             
+             char magic[4];
+             if ( fread( magic, 1, 4, fp ) != 4 ) return false;
+             if ( memcmp( magic, "VSHF", 4 ) != 0 ) return false;
+             
+             uint32_t shardCount;
+             if ( fread( &shardCount, sizeof(shardCount), 1, fp ) != 1 ) return false;
+             if ( fread( &outSize, sizeof(outSize), 1, fp ) != 1 ) return false;
+             return true;
+        }
+    }
+    else
+    {
+        // Standard File: Header is Size(8)
+        if ( entry->size < 8 ) return false;
+
+        if ( (vark.flags & VARK_MMAP) && vark.mmapHandle )
+        {
+             mio::mmap_source* mmap = (mio::mmap_source*)vark.mmapHandle;
+             if ( !mmap->is_open() ) return false;
+             if ( entry->offset + 8 > mmap->size() ) return false;
+
+             const uint8_t* ptr = (const uint8_t*)mmap->data() + entry->offset;
+             memcpy( &outSize, ptr, 8 );
+             return true;
+        }
+        else
+        {
+             VarkFP fp = VarkAcquireReadFP( vark );
+             if ( !fp ) return false;
+             if ( VARK_FSEEK( fp, (long long)entry->offset, SEEK_SET ) != 0 ) return false;
+             if ( fread( &outSize, sizeof(outSize), 1, fp ) != 1 ) return false;
+             return true;
+        }
+    }
 }
 
 bool VarkCompressAppendFile( Vark& vark, const std::string& file, uint32_t flags )
