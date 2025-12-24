@@ -608,6 +608,24 @@ UTEST( CLI, ShardedCompression )
     std::filesystem::remove( secondArchivePath );
 }
 
+UTEST( CLI, ShardedShakespeare )
+{
+    const char* archive = "tests/shakespeare.vark";
+    if ( !std::filesystem::exists( archive ) ) return;
+
+    // List archive and verify it doesn't crash
+    // The visual "Y" check is manual but this ensures the code path is covered
+    char* argv[] = { ( char* ) "vark", ( char* ) "-l", ( char* ) archive };
+    ASSERT_EQ( 0, vark_test_main( 3, argv ) );
+
+    // Verify programmatically as well
+    Vark vark;
+    ASSERT_TRUE( VarkLoadArchive( vark, archive ) );
+    ASSERT_GT( vark.files.size(), ( size_t ) 0 );
+    ASSERT_GT( vark.files[0].shardSize, ( uint32_t ) 0 );
+    VarkCloseArchive( vark );
+}
+
 UTEST( Vark, ShardedCompression )
 {
     const std::string archivePath = "sharded_test.vark";

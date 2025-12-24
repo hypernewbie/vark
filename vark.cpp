@@ -287,7 +287,7 @@ int main( int argc, char** argv )
                     f.size,
                     uncompressedSize,
                     ratio,
-                    ( f.shardSize > 0 ? "\xe2\x9c\x93" : " " ),
+                    ( f.shardSize > 0 ? "Y" : " " ),
                     f.path.string().c_str() );
             }
             else
@@ -296,7 +296,7 @@ int main( int argc, char** argv )
                     f.size,
                     "ERROR",
                     "N/A",
-                    ( f.shardSize > 0 ? "\xe2\x9c\x93" : " " ),
+                    ( f.shardSize > 0 ? "Y" : " " ),
                     f.path.string().c_str() );
             }
         }
