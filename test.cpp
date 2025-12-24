@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <chrono>
 #include <filesystem>
+#include <cstdlib>
 
 #define VARK_UNIT_TEST_MODE 1
 #include "vark.cpp"
@@ -619,6 +620,173 @@ UTEST( CLI, LegacyCompatibility )
     // Cleanup extracted files
     std::filesystem::remove_all( "testa" );
     std::filesystem::remove( "alice_in_wonderland.txt" );
+}
+
+UTEST( Vark, ShardedEdgeCases )
+{
+    const std::string archivePath = "sharded_edge.vark";
+    const std::string emptyFile = "empty.dat";
+    const std::string smallFile = "small.dat";
+    const std::string exactFile = "exact.dat";  // 128KB
+    const std::string boundaryFile = "boundary.dat"; // 128KB + 1
+
+    // Generate test files
+    {
+        FILE* fp = fopen( emptyFile.c_str(), "wb" ); fclose( fp );
+        
+        fp = fopen( smallFile.c_str(), "wb" );
+        fprintf( fp, "Small text file" );
+        fclose( fp );
+
+        std::vector<uint8_t> exactData( VARK_DEFAULT_SHARD_SIZE, 'x' );
+        fp = fopen( exactFile.c_str(), "wb" );
+        fwrite( exactData.data(), 1, exactData.size(), fp );
+        fclose( fp );
+
+        std::vector<uint8_t> boundaryData( VARK_DEFAULT_SHARD_SIZE + 1, 'y' );
+        fp = fopen( boundaryFile.c_str(), "wb" );
+        fwrite( boundaryData.data(), 1, boundaryData.size(), fp );
+        fclose( fp );
+    }
+
+    Vark vark;
+    ASSERT_TRUE( VarkCreateArchive( vark, archivePath, VARK_WRITE ) );
+    ASSERT_TRUE( VarkCompressAppendFile( vark, emptyFile, VARK_COMPRESS_SHARDED ) );
+    ASSERT_TRUE( VarkCompressAppendFile( vark, smallFile, VARK_COMPRESS_SHARDED ) );
+    ASSERT_TRUE( VarkCompressAppendFile( vark, exactFile, VARK_COMPRESS_SHARDED ) );
+    ASSERT_TRUE( VarkCompressAppendFile( vark, boundaryFile, VARK_COMPRESS_SHARDED ) );
+    VarkCloseArchive( vark );
+
+    Vark varkLoaded;
+    ASSERT_TRUE( VarkLoadArchive( varkLoaded, archivePath ) );
+
+    // Verify Empty
+    {
+        std::vector<uint8_t> data;
+        ASSERT_TRUE( VarkDecompressFile( varkLoaded, emptyFile, data ) );
+        ASSERT_EQ( (size_t)0, data.size() );
+        ASSERT_TRUE( VarkDecompressFileSharded( varkLoaded, emptyFile, 0, 0, data ) );
+    }
+
+    // Verify Small
+    {
+        std::vector<uint8_t> data;
+        ASSERT_TRUE( VarkDecompressFile( varkLoaded, smallFile, data ) );
+        std::string s( data.begin(), data.end() );
+        ASSERT_EQ( std::string("Small text file"), s );
+        
+        // Partial on small
+        ASSERT_TRUE( VarkDecompressFileSharded( varkLoaded, smallFile, 0, 5, data ) );
+        s = std::string( data.begin(), data.end() );
+        ASSERT_EQ( std::string("Small"), s );
+    }
+
+    // Verify Exact (1 shard boundary)
+    {
+        std::vector<uint8_t> data;
+        ASSERT_TRUE( VarkDecompressFile( varkLoaded, exactFile, data ) );
+        ASSERT_EQ( (size_t)VARK_DEFAULT_SHARD_SIZE, data.size() );
+    }
+
+    // Verify Boundary (2 shards, second is 1 byte)
+    {
+        std::vector<uint8_t> data;
+        ASSERT_TRUE( VarkDecompressFile( varkLoaded, boundaryFile, data ) );
+        ASSERT_EQ( (size_t)VARK_DEFAULT_SHARD_SIZE + 1, data.size() );
+        
+        // Read crossing boundary
+        ASSERT_TRUE( VarkDecompressFileSharded( varkLoaded, boundaryFile, VARK_DEFAULT_SHARD_SIZE - 10, 11, data ) );
+        ASSERT_EQ( (size_t)11, data.size() );
+        for( int i=0; i<11; ++i ) ASSERT_EQ( 'y', data[i] );
+    }
+
+    VarkCloseArchive( varkLoaded );
+    std::filesystem::remove( archivePath );
+    std::filesystem::remove( emptyFile );
+    std::filesystem::remove( smallFile );
+    std::filesystem::remove( exactFile );
+    std::filesystem::remove( boundaryFile );
+}
+
+UTEST( Vark, ShardedFuzz )
+{
+    const std::string archivePath = "sharded_fuzz.vark";
+    const std::string fuzzFile = "fuzz.dat";
+    const size_t fileSize = 5 * 1024 * 1024; // 5MB
+
+    // Generate random data
+    std::vector<uint8_t> originalData( fileSize );
+    for( size_t i=0; i<fileSize; ++i ) originalData[i] = (uint8_t)(i & 0xFF);
+
+    FILE* fp = fopen( fuzzFile.c_str(), "wb" );
+    fwrite( originalData.data(), 1, fileSize, fp );
+    fclose( fp );
+
+    Vark vark;
+    ASSERT_TRUE( VarkCreateArchive( vark, archivePath, VARK_WRITE ) );
+    ASSERT_TRUE( VarkCompressAppendFile( vark, fuzzFile, VARK_COMPRESS_SHARDED ) );
+    VarkCloseArchive( vark );
+
+    Vark varkLoaded;
+    ASSERT_TRUE( VarkLoadArchive( varkLoaded, archivePath ) );
+
+    // 100 Random reads
+    srand(123);
+    for( int i=0; i<100; ++i )
+    {
+        uint64_t off = rand() % ( fileSize - 1 );
+        uint64_t maxLen = fileSize - off;
+        uint64_t len = ( rand() % 100000 ) + 1; // up to ~100KB
+        if ( len > maxLen ) len = maxLen;
+
+        std::vector<uint8_t> part;
+        ASSERT_TRUE( VarkDecompressFileSharded( varkLoaded, fuzzFile, off, len, part ) );
+        ASSERT_EQ( (size_t)len, part.size() );
+        if ( memcmp( part.data(), originalData.data() + off, (size_t)len ) != 0 )
+        {
+            printf("Mismatch at offset %llu len %llu\n", off, len);
+            ASSERT_TRUE( false );
+        }
+    }
+
+    // Invalid Access Tests
+    std::vector<uint8_t> junk;
+    ASSERT_FALSE( VarkDecompressFileSharded( varkLoaded, fuzzFile, fileSize, 1, junk ) ); // Start at end
+    ASSERT_FALSE( VarkDecompressFileSharded( varkLoaded, fuzzFile, fileSize - 10, 20, junk ) ); // Span past end
+    ASSERT_FALSE( VarkDecompressFileSharded( varkLoaded, "nonexistent", 0, 10, junk ) );
+
+    VarkCloseArchive( varkLoaded );
+    std::filesystem::remove( archivePath );
+    std::filesystem::remove( fuzzFile );
+}
+
+UTEST( Vark, ShardedApiOnNonSharded )
+{
+    const std::string archivePath = "mixed_api.vark";
+    const std::string normalFile = "normal.dat";
+    
+    FILE* fp = fopen( normalFile.c_str(), "wb" );
+    fprintf( fp, "Normal compression" );
+    fclose( fp );
+
+    Vark vark;
+    ASSERT_TRUE( VarkCreateArchive( vark, archivePath, VARK_WRITE ) );
+    ASSERT_TRUE( VarkCompressAppendFile( vark, normalFile, 0 ) ); // 0 = standard
+    VarkCloseArchive( vark );
+
+    Vark varkLoaded;
+    ASSERT_TRUE( VarkLoadArchive( varkLoaded, archivePath ) );
+
+    std::vector<uint8_t> data;
+    // Should fail because it's not sharded
+    ASSERT_FALSE( VarkDecompressFileSharded( varkLoaded, normalFile, 0, 5, data ) );
+    
+    // Standard decompression should still work
+    ASSERT_TRUE( VarkDecompressFile( varkLoaded, normalFile, data ) );
+    
+    VarkCloseArchive( varkLoaded );
+    std::filesystem::remove( archivePath );
+    std::filesystem::remove( normalFile );
 }
 
 UTEST_MAIN()

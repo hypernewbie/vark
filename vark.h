@@ -106,12 +106,15 @@ struct VarkShardInfo
 };
 
 // For MMAP: parses VSHF from memory, returns header. pOffsets points into mmap via tempShardBuffer copy.
-static bool VarkParseVSHF_MMAP( Vark& vark, const uint8_t* ptr, VarkShardInfo& out )
+static bool VarkParseVSHF_MMAP( Vark& vark, const uint8_t* ptr, size_t entrySize, VarkShardInfo& out )
 {
+    if ( entrySize < 16 ) return false; // minimum: magic(4) + shardCount(4) + totalSize(8)
     if ( memcmp( ptr, "VSHF", 4 ) != 0 ) return false;
     ptr += 4;
     memcpy( &out.shardCount, ptr, 4 ); ptr += 4;
     memcpy( &out.totalUncompressedSize, ptr, 8 ); ptr += 8;
+    size_t needed = 16 + (size_t)(out.shardCount + 1) * 8;
+    if ( entrySize < needed ) return false;
     vark.tempShardBuffer.resize( out.shardCount + 1 );
     memcpy( vark.tempShardBuffer.data(), ptr, (out.shardCount + 1) * 8 );
     out.pOffsets = vark.tempShardBuffer.data();
@@ -134,12 +137,13 @@ static bool VarkParseVSHF_Fp( Vark& vark, FILE* fp, VarkShardInfo& out )
 }
 
 // Decompresses range [offset, offset+size) from sharded data into `data`.
+// For MMAP: hdr.pCompressedData must be set, fp should be nullptr.
+// For FP: hdr.pCompressedData should be nullptr, reads via fp from dataStartPos.
 static bool VarkDecompressShards(
     Vark& vark,
     FILE* fp,                           // nullptr for MMAP
     const VarkShardInfo& hdr,
     uint32_t shardSize,
-    const uint8_t* pCompressedBase,     // nullptr for FP
     uint64_t dataStartPos,              // file position of compressed data (FP only)
     uint64_t offset,                    // byte offset into uncompressed data (0 for full)
     uint64_t size,                      // bytes to decompress (totalUncompressedSize for full)
@@ -166,9 +170,9 @@ static bool VarkDecompressShards(
         uint8_t* dst = data.data() + (i - firstShard) * shardSize;
 
         const uint8_t* src;
-        if ( pCompressedBase )
+        if ( hdr.pCompressedData )
         {
-            src = pCompressedBase + hdr.pOffsets[i];
+            src = hdr.pCompressedData + hdr.pOffsets[i];
         }
         else
         {
@@ -377,8 +381,8 @@ bool VarkDecompressFile( Vark& vark, const std::string& file, std::vector< uint8
             if ( !mmap->is_open() ) return false;
 
             VarkShardInfo hdr;
-            if ( !VarkParseVSHF_MMAP( vark, (const uint8_t*)mmap->data() + entry->offset, hdr ) ) return false;
-            return VarkDecompressShards( vark, nullptr, hdr, entry->shardSize, hdr.pCompressedData, 0, 0, hdr.totalUncompressedSize, data );
+            if ( !VarkParseVSHF_MMAP( vark, (const uint8_t*)mmap->data() + entry->offset, (size_t)entry->size, hdr ) ) return false;
+            return VarkDecompressShards( vark, nullptr, hdr, entry->shardSize, 0, 0, hdr.totalUncompressedSize, data );
         }
         else
         {
@@ -389,7 +393,7 @@ bool VarkDecompressFile( Vark& vark, const std::string& file, std::vector< uint8
 
             VarkShardInfo hdr;
             if ( !VarkParseVSHF_Fp( vark, fp, hdr ) ) goto error1;
-            if ( !VarkDecompressShards( vark, fp, hdr, entry->shardSize, nullptr, VARK_FTELL( fp ), 0, hdr.totalUncompressedSize, data ) ) goto error1;
+            if ( !VarkDecompressShards( vark, fp, hdr, entry->shardSize, VARK_FTELL( fp ), 0, hdr.totalUncompressedSize, data ) ) goto error1;
 
             if ( ownFP ) fclose( fp );
             return true;
@@ -469,10 +473,10 @@ bool VarkDecompressFileSharded( Vark& vark, const std::string& file, uint64_t of
         if ( !mmap->is_open() ) return false;
 
         VarkShardInfo hdr;
-        if ( !VarkParseVSHF_MMAP( vark, ( const uint8_t* ) mmap->data() + entry->offset, hdr ) ) return false;
+        if ( !VarkParseVSHF_MMAP( vark, ( const uint8_t* ) mmap->data() + entry->offset, (size_t)entry->size, hdr ) ) return false;
         if ( offset + size > hdr.totalUncompressedSize ) return false;
 
-        return VarkDecompressShards( vark, nullptr, hdr, entry->shardSize, hdr.pCompressedData, 0, offset, size, data );
+        return VarkDecompressShards( vark, nullptr, hdr, entry->shardSize, 0, offset, size, data );
     }
     else
     {
@@ -486,7 +490,7 @@ bool VarkDecompressFileSharded( Vark& vark, const std::string& file, uint64_t of
         if ( offset + size > hdr.totalUncompressedSize ) goto error1;
 
         uint64_t dataStartPos = VARK_FTELL( fp );
-        if ( !VarkDecompressShards( vark, fp, hdr, entry->shardSize, nullptr, dataStartPos, offset, size, data ) ) goto error1;
+        if ( !VarkDecompressShards( vark, fp, hdr, entry->shardSize, dataStartPos, offset, size, data ) ) goto error1;
 
         if ( ownFP ) fclose( fp );
         return true;
