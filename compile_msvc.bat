@@ -1,0 +1,1 @@
+cl test.cpp /EHsc /std:c++17 /O2 /Fe:test.exe
