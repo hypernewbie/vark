@@ -1,7 +1,7 @@
 # Vark - Simple LZAV Archive
 
 [![build](https://github.com/hypernewbie/vark/actions/workflows/build.yml/badge.svg)](https://github.com/hypernewbie/vark/actions/workflows/build.yml)
-[![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/hypernewbie/vark/releases/download/v1.02/vark-windows-v1.02.zip) [![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/hypernewbie/vark/releases/download/v1.02/vark-linux-v1.02.zip) [![macOS](https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/hypernewbie/vark/releases/download/v1.02/vark-macos-v1.02.zip)
+[![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/hypernewbie/vark/releases/download/v1.03/vark-windows-v1.03.zip) [![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/hypernewbie/vark/releases/download/v1.03/vark-linux-v1.03.zip) [![macOS](https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/hypernewbie/vark/releases/download/v1.03/vark-macos-v1.03.zip)
 
 ### Load stuff at DDR2 RAM speed!
 
