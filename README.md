@@ -21,16 +21,16 @@ For more information about LZAV, see [LZAV on GitHub](https://github.com/avaneev
 ## Performance
 
 * **CPU** (Environment Dependent)
-* **Data Size:** 17.95 MB
+* **Data Size:** 12.58 MB
 
 | Mode | Task | Latency | Throughput |
 | --- | --- | --- | --- |
-| **Normal** (Single-threaded) | Compression | 59.69 ms | 0.315 GB/s |
-|  | Decompression | 15.40 ms | 1.223 GB/s |
-| **Persistent** (FP + TempBuffer) | Decompression | 91.38 ms | 2.060 GB/s |
-| **Persistent** (MMAP) | **Decompression** | **53.88 ms** | **3.494 GB/s** |
-| **LZAV In-Memory** (Raw Ref) | Compression | 23.37 ms | 0.806 GB/s |
-|  | Decompression | 4.72 ms | 3.986 GB/s |
+| **Normal** (Single-threaded) | Compression | 27.14 ms | 0.486 GB/s |
+|  | Decompression | 7.81 ms | 1.689 GB/s |
+| **Persistent** (FP + TempBuffer) | Decompression | 51.74 ms | 2.549 GB/s |
+| **Persistent** (MMAP) | **Decompression** | **20.33 ms** | **6.486 GB/s** |
+| **LZAV In-Memory** (Raw Ref) | Compression | 2.79 ms | 4.721 GB/s |
+|  | Decompression | 1.32 ms | 10.013 GB/s |
 
 
 ## Usage

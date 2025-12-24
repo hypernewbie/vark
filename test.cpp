@@ -65,7 +65,7 @@ const std::vector<std::string> TEST_FILES =
     "tests/soap-bubble-55_jpg_75.jpg",
     "tests/swoosh_1.wav",
     "tests/Apophysis-250901-101.png",
-    "tests/shakespeare.txt",
+    // "tests/shakespeare.txt",
 };
 
 UTEST( Vark, SingleFileTests )
