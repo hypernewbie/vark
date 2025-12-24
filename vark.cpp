@@ -27,6 +27,7 @@
 
 #define VARK_IMPLEMENTATION
 #include "vark.h"
+#include "argparse/argparse.hpp"
 
 namespace fs = std::filesystem;
 
@@ -60,60 +61,108 @@ static void ProcessFiles( Vark& vark, const std::vector<std::string>& files, con
     }
 }
 
-void PrintUsage()
-{
-    printf( "Usage:\n" );
-    printf( "  vark -c <archive> <files...>\tCreate archive\n" );
-    printf( "  vark -cs <archive> <files...>\tCreate archive (sharded compression)\n" );
-    printf( "  vark -a <archive> <files...>\tAppend to archive\n" );
-    printf( "  vark -as <archive> <files...>\tAppend to archive (sharded)\n" );
-    printf( "  vark -x <archive>\t\tExtract archive\n" );
-    printf( "  vark -l <archive>\t\tList archive contents\n" );
-    printf( "  vark -v <archive>\t\tVerify archive integrity\n" );
-    printf( "  vark <archive>\t\tSmart mode (Extract if .vark, Create/Append otherwise)\n" );
-}
-
 #ifdef VARK_UNIT_TEST_MODE
 int vark_test_main( int argc, char** argv )
 #else // !VARK_UNIT_TEST_MODE
 int main( int argc, char** argv )
 #endif // VARK_UNIT_TEST_MODE
 {
-    std::string mode = "";
-    std::string archivePath;
-    std::string arg1;
-    std::vector<std::string> inputFiles;
-    Vark vark;
-    int argIdx = 1;
-    bool exists = false;
-    bool hasInputs = false;
+    argparse::ArgumentParser program( "vark", "1.04" );
 
-    if ( argc < 2 )
+    program.add_description( "A minimal LZAV archive tool for fast compression and decompression. Supports sharded compression for efficient random access to large files. Use without flags for smart mode: extracts existing archives or creates new ones automatically." );
+
+    program.add_argument( "-c" )
+        .help( "Create archive" )
+        .default_value( false )
+        .implicit_value( true );
+
+    program.add_argument( "-cs" )
+        .help( "Create archive (sharded compression)" )
+        .default_value( false )
+        .implicit_value( true );
+
+    program.add_argument( "-a" )
+        .help( "Append to archive" )
+        .default_value( false )
+        .implicit_value( true );
+
+    program.add_argument( "-as" )
+        .help( "Append to archive (sharded)" )
+        .default_value( false )
+        .implicit_value( true );
+
+    program.add_argument( "-x" )
+        .help( "Extract archive" )
+        .default_value( false )
+        .implicit_value( true );
+
+    program.add_argument( "-l" )
+        .help( "List archive contents" )
+        .default_value( false )
+        .implicit_value( true );
+
+    program.add_argument( "-v" )
+        .help( "Verify archive integrity" )
+        .default_value( false )
+        .implicit_value( true );
+
+    program.add_argument( "archive" )
+        .help( "archive file path" );
+
+    program.add_argument( "files" )
+        .remaining()
+        .help( "input files or directories" );
+
+    program.add_epilog( "Examples:\n"
+                        "  vark data.vark                    Extract archive (smart mode)\n"
+                        "  vark -c game.vark assets/         Create archive from directory\n"
+                        "  vark -cs textures.vark images/    Create with sharded compression\n"
+                        "  vark -a game.vark newfile.dat     Append file to existing archive\n"
+                        "  vark -l game.vark                 List archive contents" );
+
+    try
     {
-        PrintUsage();
+        program.parse_args( argc, argv );
+    }
+    catch ( const std::runtime_error& err )
+    {
+        if ( argc > 1 ) std::cerr << "Error: " << err.what() << std::endl;
+        std::cerr << program;
         return 1;
     }
 
-    arg1 = argv[argIdx];
-
-    if ( arg1 == "-c" || arg1 == "-cs" || arg1 == "-x" || arg1 == "-a" || arg1 == "-as" || arg1 == "-l" || arg1 == "-v" )
+    std::string archivePath = program.get<std::string>( "archive" );
+    std::vector<std::string> rawInputFiles;
+    try
     {
-        mode = arg1;
-        argIdx++;
-        if ( argIdx >= argc )
-        {
-            printf( "Error: Missing archive name.\n" );
-            return 1;
-        }
-        archivePath = argv[argIdx++];
+        rawInputFiles = program.get<std::vector<std::string>>( "files" );
     }
-    else
+    catch ( ... )
     {
-        archivePath = arg1;
-        argIdx++;
+        // No files provided
+    }
 
-        exists = fs::exists( archivePath );
-        hasInputs = ( argIdx < argc );
+    std::string mode = "";
+    int flagsSet = 0;
+    if ( program["-c"]  == true ) { mode = "-c";  flagsSet++; }
+    if ( program["-cs"] == true ) { mode = "-cs"; flagsSet++; }
+    if ( program["-a"]  == true ) { mode = "-a";  flagsSet++; }
+    if ( program["-as"] == true ) { mode = "-as"; flagsSet++; }
+    if ( program["-x"]  == true ) { mode = "-x";  flagsSet++; }
+    if ( program["-l"]  == true ) { mode = "-l";  flagsSet++; }
+    if ( program["-v"]  == true ) { mode = "-v";  flagsSet++; }
+
+    if ( flagsSet > 1 )
+    {
+        std::cerr << "Error: Multiple mode flags set." << std::endl;
+        return 1;
+    }
+
+    if ( flagsSet == 0 )
+    {
+        // Smart mode
+        bool exists = fs::exists( archivePath );
+        bool hasInputs = !rawInputFiles.empty();
 
         if ( exists && !hasInputs )
         {
@@ -123,20 +172,22 @@ int main( int argc, char** argv )
         {
             mode = "-a";
         }
-        else {
+        else
+        {
             mode = "-c";
         }
     }
 
-    // Gather input files
-    for ( ; argIdx < argc; ++argIdx )
+    std::vector<std::string> inputFiles;
+    for ( const auto& path : rawInputFiles )
     {
-        AddToFiles( inputFiles, argv[argIdx] );
+        AddToFiles( inputFiles, path );
     }
 
     uint32_t compressFlags = 0;
     if ( mode == "-cs" || mode == "-as" ) compressFlags |= VARK_COMPRESS_SHARDED;
 
+    Vark vark;
     if ( mode == "-c" || mode == "-cs" )
     {
         if ( inputFiles.empty() )
@@ -300,7 +351,7 @@ int main( int argc, char** argv )
     }
     else
     {
-        PrintUsage();
+        std::cerr << program;
         return 1;
     }
 
