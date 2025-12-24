@@ -224,4 +224,104 @@ UTEST(Vark, InMemoryPerf) {
     printf("Decompression: %.2f ms (%.3f GB/sec)\n", decompTimeSec.count() * 1000.0, totalGB / decompTimeSec.count());
 }
 
+UTEST(Vark, PersistentMode) {
+    const std::string archivePath = "persistent_test.vark";
+    Vark vark;
+    ASSERT_TRUE(VarkCreateArchive(vark, archivePath));
+    for (const auto& filePath : TEST_FILES) {
+        ASSERT_TRUE(VarkCompressAppendFile(vark, filePath));
+    }
+
+    // Load with persistent FP
+    Vark varkLoaded;
+    ASSERT_TRUE(VarkLoadArchive(varkLoaded, archivePath, VARK_PERSISTENT_FP));
+    ASSERT_TRUE(varkLoaded.fp != nullptr);
+
+    // Decompress multiple times
+    for (int i = 0; i < 3; ++i) {
+        for (const auto& filePath : TEST_FILES) {
+            std::vector<uint8_t> data;
+            ASSERT_TRUE(VarkDecompressFile(varkLoaded, filePath, data));
+            ASSERT_GT(data.size(), 0);
+        }
+    }
+
+    VarkCloseArchive(varkLoaded);
+    ASSERT_TRUE(varkLoaded.fp == nullptr);
+    remove(archivePath.c_str());
+}
+
+UTEST(Vark, PerfPersistent) {
+    const std::string archivePath = "perf_persistent.vark";
+    Vark vark;
+    ASSERT_TRUE(VarkCreateArchive(vark, archivePath));
+    
+    uint64_t totalSizeBytes = 0;
+    for (const auto& filePath : TEST_FILES) {
+        ASSERT_TRUE(VarkCompressAppendFile(vark, filePath));
+        totalSizeBytes += std::filesystem::file_size(filePath);
+    }
+    double totalGB = (double)totalSizeBytes / (1000.0 * 1000.0 * 1000.0);
+
+    Vark varkLoaded;
+    ASSERT_TRUE(VarkLoadArchive(varkLoaded, archivePath, VARK_PERSISTENT_FP | VARK_PERSISTENT_TEMPBUFFER));
+
+    printf("\n[ Performance Results (Persistent FP + TempBuffer) ]\n");
+    std::vector<uint8_t> data;
+    data.reserve(1024 * 1024 * 16);
+    auto startDecomp = std::chrono::high_resolution_clock::now();
+    
+    // Run multiple iterations to amortize overhead and get better measurement
+    int iterations = 10;
+    for (int i = 0; i < iterations; ++i) {
+        for (const auto& filePath : TEST_FILES) {
+            ASSERT_TRUE(VarkDecompressFile(varkLoaded, filePath, data));
+        }
+    }
+    auto endDecomp = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> decompTimeSec = endDecomp - startDecomp;
+    
+    double totalProcessedGB = totalGB * iterations;
+    printf("Decompression: %.2f ms (%.3f GB/sec)\n", decompTimeSec.count() * 1000.0, totalProcessedGB / decompTimeSec.count());
+
+    VarkCloseArchive(varkLoaded);
+    remove(archivePath.c_str());
+}
+
+UTEST(Vark, PerfMapped) {
+    const std::string archivePath = "perf_mapped.vark";
+    Vark vark;
+    ASSERT_TRUE(VarkCreateArchive(vark, archivePath));
+    
+    uint64_t totalSizeBytes = 0;
+    for (const auto& filePath : TEST_FILES) {
+        ASSERT_TRUE(VarkCompressAppendFile(vark, filePath));
+        totalSizeBytes += std::filesystem::file_size(filePath);
+    }
+    double totalGB = (double)totalSizeBytes / (1000.0 * 1000.0 * 1000.0);
+
+    Vark varkLoaded;
+    ASSERT_TRUE(VarkLoadArchive(varkLoaded, archivePath, VARK_MMAP | VARK_PERSISTENT_TEMPBUFFER));
+
+    printf("\n[ Performance Results (Memory Mapped) ]\n");
+    std::vector<uint8_t> data;
+    data.reserve(1024 * 1024 * 16);
+    auto startDecomp = std::chrono::high_resolution_clock::now();
+    
+    int iterations = 10;
+    for (int i = 0; i < iterations; ++i) {
+        for (const auto& filePath : TEST_FILES) {
+            ASSERT_TRUE(VarkDecompressFile(varkLoaded, filePath, data));
+        }
+    }
+    auto endDecomp = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> decompTimeSec = endDecomp - startDecomp;
+    
+    double totalProcessedGB = totalGB * iterations;
+    printf("Decompression: %.2f ms (%.3f GB/sec)\n", decompTimeSec.count() * 1000.0, totalProcessedGB / decompTimeSec.count());
+
+    VarkCloseArchive(varkLoaded);
+    remove(archivePath.c_str());
+}
+
 UTEST_MAIN()
