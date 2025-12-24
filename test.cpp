@@ -357,6 +357,23 @@ UTEST( Vark, PerfMapped )
     remove( archivePath.c_str() );
 }
 
+UTEST( Vark, NegativeTests )
+{
+    Vark vark;
+    const std::string path = "negative_test.vark";
+
+    // Test Create with both flags
+    ASSERT_FALSE( VarkCreateArchive( vark, path, VARK_WRITE | VARK_MMAP ) );
+
+    // Test Load with both flags
+    // First create a valid archive so load can even try to open it
+    ASSERT_TRUE( VarkCreateArchive( vark, path, VARK_WRITE ) );
+    VarkCloseArchive( vark );
+    ASSERT_FALSE( VarkLoadArchive( vark, path, VARK_WRITE | VARK_MMAP ) );
+
+    remove( path.c_str() );
+}
+
 UTEST( CLI, Help )
 {
     char* argv[] = { ( char* ) "vark" };

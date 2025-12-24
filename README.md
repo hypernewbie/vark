@@ -89,7 +89,7 @@ cmake -S . -B build
 cmake --build build --config Release
 
 # Run tests
-ctest --test-dir build -C Release
+ctest --test-dir build -C Release --output-on-failure
 ```
 
 The build will produce `vark` (the CLI tool) and `vark_tests` (the test suite) in the build directory.

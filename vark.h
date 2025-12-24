@@ -119,15 +119,13 @@ bool VarkCreateArchive( Vark& vark, const std::string& path, uint32_t flags )
 
     if ( ( flags & VARK_WRITE ) && ( flags & VARK_MMAP ) ) return false;
 
-    fp = fopen( path.c_str(), "wb" );
+    fp = fopen( path.c_str(), "w+b" );
     if ( !fp ) goto error0;
 
     if ( fwrite( magic, 1, 4, fp ) != 4 ) goto error1;
 
-    uint64_t tableOffset = 12; // Magic(4) + TableOffset(8)
     if ( fwrite( &tableOffset, sizeof(tableOffset), 1, fp ) != 1 ) goto error1;
 
-    uint64_t count = 0;
     if ( fwrite( &count, sizeof(count), 1, fp ) != 1 ) goto error1;
 
     vark.path = path;
@@ -166,12 +164,10 @@ bool VarkLoadArchive( Vark& vark, const std::string& path, uint32_t flags )
     if ( fread( magic, 1, 4, fp ) != 4 ) goto error1;
     if ( memcmp( magic, "VARK", 4 ) != 0 ) goto error1;
 
-    uint64_t tableOffset = 0;
     if ( fread( &tableOffset, sizeof(tableOffset), 1, fp ) != 1 ) goto error1;
 
     if ( VARK_FSEEK( fp, (long long)tableOffset, SEEK_SET ) != 0 ) goto error1;
 
-    uint64_t count = 0;
     if ( fread( &count, sizeof(count), 1, fp ) != 1 ) goto error1;
 
     vark.files.clear();
