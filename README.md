@@ -31,16 +31,42 @@ For more information about LZAV, see [LZAV on GitHub](https://github.com/avaneev
 
 ## Usage
 
+### C++ API
+
 ```cpp
 #include "vark.h"
 
-int main() {
-    Vark vark;
-    ASSERT_TRUE(VarkCreateArchive(vark, "test.vark"));
-    ASSERT_TRUE(VarkCompressAppendFile(vark, "test.txt"));
-    return 0;
-}
+// Define implementation in one C++ file
+#define VARK_IMPLEMENTATION
+#include "vark.h"
+
+Vark vark;
+
+// Create a new archive
+VarkCreateArchive(vark, "data.vark", VARK_WRITE);
+
+// Append a file
+VarkCompressAppendFile(vark, "file.txt");
+
+// Load an existing archive for reading
+VarkLoadArchive(vark, "data.vark", VARK_MMAP);
+
+// Decompress a file
+std::vector<uint8_t> data;
+VarkDecompressFile(vark, "file.txt", data);
+
+// Always close when done
+VarkCloseArchive(vark);
 ```
+
+#### Flags
+
+| Flag | Description |
+| --- | --- |
+| `VARK_PERSISTENT_FP` | Keeps the file handle open between operations. Recommended for batch tasks. |
+| `VARK_PERSISTENT_TEMPBUFFER` | Reuses internal memory buffers to avoid repeated allocations. |
+| `VARK_MMAP` | Uses Memory-Mapped I/O for zero-copy reads. Incompatible with `VARK_WRITE`. |
+| `VARK_WRITE` | Enables write/append operations. Disables read operations. |
 
 ### CLI
 ```

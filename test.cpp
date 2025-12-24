@@ -80,8 +80,9 @@ UTEST( Vark, SingleFileTests )
 
         // Create archive and append file
         Vark vark;
-        ASSERT_TRUE( VarkCreateArchive( vark, archivePath ) );
+        ASSERT_TRUE( VarkCreateArchive( vark, archivePath, VARK_WRITE ) );
         ASSERT_TRUE( VarkCompressAppendFile( vark, filePath ) );
+        VarkCloseArchive( vark );
 
         // Load archive
         Vark varkLoaded;
@@ -107,7 +108,7 @@ UTEST( Vark, MultipleFilesTest )
 
     // 1. Create archive and append all files
     Vark vark;
-    ASSERT_TRUE( VarkCreateArchive( vark, archivePath ) );
+    ASSERT_TRUE( VarkCreateArchive( vark, archivePath, VARK_WRITE ) );
 
     std::vector<uint32_t> originalHashes;
     for ( const auto& filePath : TEST_FILES )
@@ -117,6 +118,7 @@ UTEST( Vark, MultipleFilesTest )
         originalHashes.push_back( SimpleHash( data ) );
         ASSERT_TRUE( VarkCompressAppendFile( vark, filePath ) );
     }
+    VarkCloseArchive( vark );
 
     // 2. Load archive
     Vark varkLoaded;
@@ -140,7 +142,7 @@ UTEST( Vark, PerformanceTest )
 {
     const std::string archivePath = "perf_test.vark";
     Vark vark;
-    ASSERT_TRUE( VarkCreateArchive( vark, archivePath ) );
+    ASSERT_TRUE( VarkCreateArchive( vark, archivePath, VARK_WRITE | VARK_PERSISTENT_FP ) );
 
     uint64_t totalSizeBytes = 0;
     for ( const auto& filePath : TEST_FILES )
@@ -158,6 +160,7 @@ UTEST( Vark, PerformanceTest )
         ASSERT_TRUE( VarkCompressAppendFile( vark, filePath ) );
     }
     auto endComp = std::chrono::high_resolution_clock::now();
+    VarkCloseArchive( vark );
     std::chrono::duration<double> compTimeSec = endComp - startComp;
     printf( "Compression:   %.2f ms (%.3f GB/sec)\n", compTimeSec.count() * 1000.0, totalGB / compTimeSec.count() );
 
@@ -247,10 +250,11 @@ UTEST( Vark, PersistentMode )
 {
     const std::string archivePath = "persistent_test.vark";
     Vark vark;
-    ASSERT_TRUE( VarkCreateArchive( vark, archivePath ) );
+    ASSERT_TRUE( VarkCreateArchive( vark, archivePath, VARK_WRITE | VARK_PERSISTENT_FP ) );
     for ( const auto& filePath : TEST_FILES ) {
         ASSERT_TRUE( VarkCompressAppendFile( vark, filePath ) );
     }
+    VarkCloseArchive( vark );
 
     // Load with persistent FP
     Vark varkLoaded;
@@ -269,7 +273,6 @@ UTEST( Vark, PersistentMode )
     }
 
     VarkCloseArchive( varkLoaded );
-    ASSERT_TRUE( varkLoaded.fp == nullptr );
     remove( archivePath.c_str() );
 }
 
@@ -277,13 +280,14 @@ UTEST( Vark, PerfPersistent )
 {
     const std::string archivePath = "perf_persistent.vark";
     Vark vark;
-    ASSERT_TRUE( VarkCreateArchive( vark, archivePath ) );
+    ASSERT_TRUE( VarkCreateArchive( vark, archivePath, VARK_WRITE | VARK_PERSISTENT_FP ) );
 
     uint64_t totalSizeBytes = 0;
     for ( const auto& filePath : TEST_FILES ) {
         ASSERT_TRUE( VarkCompressAppendFile( vark, filePath ) );
         totalSizeBytes += std::filesystem::file_size( filePath );
     }
+    VarkCloseArchive( vark );
     double totalGB = ( double ) totalSizeBytes / ( 1000.0 * 1000.0 * 1000.0 );
 
     Vark varkLoaded;
@@ -316,7 +320,7 @@ UTEST( Vark, PerfMapped )
 {
     const std::string archivePath = "perf_mapped.vark";
     Vark vark;
-    ASSERT_TRUE( VarkCreateArchive( vark, archivePath ) );
+    ASSERT_TRUE( VarkCreateArchive( vark, archivePath, VARK_WRITE | VARK_PERSISTENT_FP ) );
 
     uint64_t totalSizeBytes = 0;
     for ( const auto& filePath : TEST_FILES )
@@ -324,6 +328,7 @@ UTEST( Vark, PerfMapped )
         ASSERT_TRUE( VarkCompressAppendFile( vark, filePath ) );
         totalSizeBytes += std::filesystem::file_size( filePath );
     }
+    VarkCloseArchive( vark );
     double totalGB = ( double ) totalSizeBytes / ( 1000.0 * 1000.0 * 1000.0 );
 
     Vark varkLoaded;

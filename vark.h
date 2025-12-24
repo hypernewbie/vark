@@ -30,6 +30,7 @@
 #define VARK_PERSISTENT_FP 0x1
 #define VARK_PERSISTENT_TEMPBUFFER 0x2
 #define VARK_MMAP 0x4
+#define VARK_WRITE 0x8
 
 struct VarkFile 
 {
@@ -111,10 +112,16 @@ static std::string VarkReadString( FILE* fp )
 
 bool VarkCreateArchive( Vark& vark, const std::string& path, uint32_t flags )
 {
-    FILE* fp = fopen( path.c_str(), "wb" );
+    FILE* fp = nullptr;
+    const char magic[] = "VARK";
+    uint64_t tableOffset = 12; // Magic(4) + TableOffset(8)
+    uint64_t count = 0;
+
+    if ( ( flags & VARK_WRITE ) && ( flags & VARK_MMAP ) ) return false;
+
+    fp = fopen( path.c_str(), "wb" );
     if ( !fp ) goto error0;
 
-    const char magic[] = "VARK";
     if ( fwrite( magic, 1, 4, fp ) != 4 ) goto error1;
 
     uint64_t tableOffset = 12; // Magic(4) + TableOffset(8)
@@ -146,10 +153,16 @@ error0:
 
 bool VarkLoadArchive( Vark& vark, const std::string& path, uint32_t flags )
 {
-    FILE* fp = fopen( path.c_str(), "rb" );
+    FILE* fp = nullptr;
+    char magic[4];
+    uint64_t tableOffset = 0;
+    uint64_t count = 0;
+
+    if ( ( flags & VARK_WRITE ) && ( flags & VARK_MMAP ) ) return false;
+
+    fp = fopen( path.c_str(), ( flags & VARK_WRITE ) ? "r+b" : "rb" );
     if ( !fp ) goto error0;
 
-    char magic[4];
     if ( fread( magic, 1, 4, fp ) != 4 ) goto error1;
     if ( memcmp( magic, "VARK", 4 ) != 0 ) goto error1;
 
@@ -236,6 +249,8 @@ bool VarkDecompressFile( Vark& vark, const std::string& file, std::vector< uint8
     uint64_t uncompressedSize = 0;
     uint64_t compressedSize = 0;
     bool ownFP = false;
+
+    if ( vark.flags & VARK_WRITE ) return false;
 
     for ( const auto& f : vark.files )
     {
@@ -334,6 +349,8 @@ bool VarkCompressAppendFile( Vark& vark, const std::string& file )
     uint64_t newTableOffset = 0;
     uint64_t count = 0;
 
+    if ( !( vark.flags & VARK_WRITE ) ) return false;
+
     // Read source file
     srcFp = fopen( file.c_str(), "rb" );
     if ( !srcFp ) goto error0;
@@ -357,8 +374,15 @@ bool VarkCompressAppendFile( Vark& vark, const std::string& file )
     if ( compressedLen == 0 && srcLen > 0 ) return false;
 
     // Open archive for Read/Update
-    fp = fopen( vark.path.string().c_str(), "r+b" );
-    if ( !fp ) goto error0;
+    if ( (vark.flags & VARK_PERSISTENT_FP) && vark.fp )
+    {
+        fp = vark.fp;
+    }
+    else
+    {
+        fp = fopen( vark.path.string().c_str(), "r+b" );
+        if ( !fp ) goto error0;
+    }
 
     // Read existing table offset
     if ( VARK_FSEEK( fp, 4, SEEK_SET ) != 0 ) goto error2;
@@ -405,11 +429,11 @@ bool VarkCompressAppendFile( Vark& vark, const std::string& file )
     VARK_FSEEK( fp, 0, SEEK_END );
     vark.size = (uint64_t)VARK_FTELL( fp );
 
-    fclose( fp );
+    if ( fp != vark.fp ) fclose( fp );
     return true;
 
 error2:
-    fclose( fp );
+    if ( fp != vark.fp ) fclose( fp );
     return false;
 
 error1:

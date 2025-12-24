@@ -129,7 +129,7 @@ int main( int argc, char** argv )
         }
 
         printf( "Creating archive: %s\n", archivePath.c_str() );
-        if ( !VarkCreateArchive( vark, archivePath ) )
+        if ( !VarkCreateArchive( vark, archivePath, VARK_WRITE | VARK_PERSISTENT_FP ) )
         {
             printf( "Error: Failed to create archive.\n" );
             return 1;
@@ -143,6 +143,7 @@ int main( int argc, char** argv )
                 printf( "Error: Failed to add %s\n", f.c_str() );
             }
         }
+        VarkCloseArchive( vark );
     }
     else if ( mode == "-a" )
     {
@@ -155,9 +156,9 @@ int main( int argc, char** argv )
         if ( !fs::exists( archivePath ) )
         {
             printf( "Archive not found, creating new: %s\n", archivePath.c_str() );
-            if ( !VarkCreateArchive( vark, archivePath ) ) return 1;
+            if ( !VarkCreateArchive( vark, archivePath, VARK_WRITE | VARK_PERSISTENT_FP ) ) return 1;
         }
-        else if ( !VarkLoadArchive( vark, archivePath ) )
+        else if ( !VarkLoadArchive( vark, archivePath, VARK_WRITE | VARK_PERSISTENT_FP ) )
         {
             printf( "Error: Failed to load archive %s\n", archivePath.c_str() );
             return 1;
@@ -171,6 +172,7 @@ int main( int argc, char** argv )
                 printf( "Error: Failed to append %s\n", f.c_str() );
             }
         }
+        VarkCloseArchive( vark );
     }
     else if ( mode == "-x" )
     {
