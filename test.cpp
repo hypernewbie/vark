@@ -291,7 +291,7 @@ UTEST( Vark, PerfPersistent )
     double totalGB = ( double ) totalSizeBytes / ( 1000.0 * 1000.0 * 1000.0 );
 
     Vark varkLoaded;
-    ASSERT_TRUE( VarkLoadArchive( varkLoaded, archivePath, VARK_PERSISTENT_FP | VARK_PERSISTENT_TEMPBUFFER ) );
+    ASSERT_TRUE( VarkLoadArchive( varkLoaded, archivePath, VARK_PERSISTENT_FP ) );
 
     printf( "\n[ Performance Results (Persistent FP + TempBuffer) ]\n" );
     std::vector<uint8_t> data;
@@ -332,7 +332,7 @@ UTEST( Vark, PerfMapped )
     double totalGB = ( double ) totalSizeBytes / ( 1000.0 * 1000.0 * 1000.0 );
 
     Vark varkLoaded;
-    ASSERT_TRUE( VarkLoadArchive( varkLoaded, archivePath, VARK_MMAP | VARK_PERSISTENT_TEMPBUFFER ) );
+    ASSERT_TRUE( VarkLoadArchive( varkLoaded, archivePath, VARK_MMAP ) );
 
     printf( "\n[ Performance Results (Memory Mapped) ]\n" );
     std::vector<uint8_t> data;
@@ -467,6 +467,108 @@ UTEST( CLI, DirectoryRecursion )
 
     VarkCloseArchive( vark );
     std::filesystem::remove( archive );
+}
+
+UTEST( Vark, ShardedCompression )
+{
+    const std::string archivePath = "sharded_test.vark";
+    const std::string largeFile = "tests/Apophysis-250901-101.png"; // Use a larger file to ensure multiple shards
+
+    // 1. Create Sharded Archive
+    Vark vark;
+    ASSERT_TRUE( VarkCreateArchive( vark, archivePath, VARK_WRITE ) );
+    ASSERT_TRUE( VarkCompressAppendFile( vark, largeFile, VARK_COMPRESS_SHARDED ) );
+    VarkCloseArchive( vark );
+
+    // 2. Load and Verify Shard Metadata
+    Vark varkLoaded;
+    ASSERT_TRUE( VarkLoadArchive( varkLoaded, archivePath ) );
+    ASSERT_EQ( (size_t)1, varkLoaded.files.size() );
+    ASSERT_EQ( (uint32_t)(1024 * 1024), varkLoaded.files[0].shardSize );
+
+    // 3. Decompress and Verify Data
+    std::vector<uint8_t> originalData = ReadFileContent( largeFile );
+    std::vector<uint8_t> decompressedData;
+    
+    // Test with both Standard I/O and MMAP if possible
+    ASSERT_TRUE( VarkDecompressFile( varkLoaded, largeFile, decompressedData ) );
+    ASSERT_EQ( originalData.size(), decompressedData.size() );
+    ASSERT_EQ( SimpleHash( originalData ), SimpleHash( decompressedData ) );
+
+    VarkCloseArchive( varkLoaded );
+    
+    // 4. Test MMAP Decompression
+    Vark varkMmap;
+    ASSERT_TRUE( VarkLoadArchive( varkMmap, archivePath, VARK_MMAP ) );
+    std::vector<uint8_t> decompressedDataMmap;
+    ASSERT_TRUE( VarkDecompressFile( varkMmap, largeFile, decompressedDataMmap ) );
+    ASSERT_EQ( originalData.size(), decompressedDataMmap.size() );
+    ASSERT_EQ( SimpleHash( originalData ), SimpleHash( decompressedDataMmap ) );
+    VarkCloseArchive( varkMmap );
+
+    remove( archivePath.c_str() );
+}
+
+UTEST( Vark, LegacyCompatibility )
+{
+    const std::string archivePath = "tests/compat_v102.vark";
+    
+    // Ensure the legacy file exists before testing
+    if ( !std::filesystem::exists( archivePath ) ) 
+    {
+        printf( "[WARNING] Legacy test file not found, skipping LegacyCompatibility test.\n" );
+        return;
+    }
+
+    Vark vark;
+    ASSERT_TRUE( VarkLoadArchive( vark, archivePath ) );
+    ASSERT_GT( vark.files.size(), (size_t)0 );
+
+    // Verify all files have shardSize == 0 (Default/Legacy)
+    for ( const auto& f : vark.files )
+    {
+        ASSERT_EQ( (uint32_t)0, f.shardSize );
+    }
+
+    // Verify we can decompress (just check the first file)
+    if ( !vark.files.empty() )
+    {
+        std::vector<uint8_t> data;
+        // We don't have the original hash to compare against, but we can check if decompress returns true
+        ASSERT_TRUE( VarkDecompressFile( vark, vark.files[0].path.string(), data ) );
+        ASSERT_GT( data.size(), (size_t)0 );
+    }
+
+    VarkCloseArchive( vark );
+    // remove( archivePath.c_str() ); // DO NOT remove legacy test file
+}
+
+UTEST( CLI, LegacyCompatibility )
+{
+    const char* archive = "tests/compat_v102.vark";
+    if ( !std::filesystem::exists( archive ) ) return;
+
+    // 1. List
+    {
+        char* argv[] = { ( char* ) "vark", ( char* ) "-l", ( char* ) archive };
+        ASSERT_EQ( 0, vark_test_main( 3, argv ) );
+    }
+
+    // 2. Verify
+    {
+        char* argv[] = { ( char* ) "vark", ( char* ) "-v", ( char* ) archive };
+        ASSERT_EQ( 0, vark_test_main( 3, argv ) );
+    }
+
+    // 3. Extract (Standard Mode)
+    {
+        char* argv[] = { ( char* ) "vark", ( char* ) "-x", ( char* ) archive };
+        ASSERT_EQ( 0, vark_test_main( 3, argv ) );
+    }
+
+    // Cleanup extracted files
+    std::filesystem::remove_all( "testa" );
+    std::filesystem::remove( "alice_in_wonderland.txt" );
 }
 
 UTEST_MAIN()

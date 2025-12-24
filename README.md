@@ -66,7 +66,6 @@ VarkCloseArchive(vark);
 | Flag | Description |
 | --- | --- |
 | `VARK_PERSISTENT_FP` | Keeps the file handle open between operations. Recommended for batch tasks. |
-| `VARK_PERSISTENT_TEMPBUFFER` | Reuses internal memory buffers to avoid repeated allocations. |
 | `VARK_MMAP` | Uses Memory-Mapped I/O for zero-copy reads. Incompatible with `VARK_WRITE`. |
 | `VARK_WRITE` | Enables write/append operations. Disables read operations. |
 

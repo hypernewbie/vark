@@ -175,7 +175,7 @@ int main( int argc, char** argv )
     else if ( mode == "-x" )
     {
         printf( "Extracting archive: %s\n", archivePath.c_str() );
-        if ( !VarkLoadArchive( vark, archivePath, VARK_MMAP | VARK_PERSISTENT_TEMPBUFFER ) )
+        if ( !VarkLoadArchive( vark, archivePath, VARK_MMAP ) )
         {
             printf( "Error: Failed to load archive.\n" );
             return 1;
@@ -188,7 +188,9 @@ int main( int argc, char** argv )
             std::vector<uint8_t> data;
             if ( VarkDecompressFile( vark, file.path.string(), data ) )
             {
-                fs::create_directories( file.path.parent_path() );
+                fs::path parent = file.path.parent_path();
+                if ( !parent.empty() ) fs::create_directories( parent );
+                
                 FILE* out = fopen( file.path.string().c_str(), "wb" );
                 if ( out )
                 {
@@ -228,7 +230,7 @@ int main( int argc, char** argv )
     {
         uint32_t failCount = 0;
 
-        if ( !VarkLoadArchive( vark, archivePath, VARK_MMAP | VARK_PERSISTENT_TEMPBUFFER ) )
+        if ( !VarkLoadArchive( vark, archivePath, VARK_MMAP ) )
         {
             printf( "Error: Failed to load archive %s\n", archivePath.c_str() );
             return 1;
