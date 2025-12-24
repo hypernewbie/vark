@@ -28,13 +28,15 @@
 #include <filesystem>
 #include <unordered_map>
 
+// ---------------------------------------------------- Interface ----------------------------------------------------
+
 #define VARK_PERSISTENT_FP 0x1
-#define VARK_MMAP 0x4
-#define VARK_WRITE 0x8
+#define VARK_MMAP 0x2
+#define VARK_WRITE 0x4
 
 // VarkCompressAppendFile flags
 #define VARK_COMPRESS_SHARDED 0x1
-#define VARK_DEFAULT_SHARD_SIZE (1024 * 1024)
+#define VARK_DEFAULT_SHARD_SIZE (128 * 1024)
 
 struct VarkFile 
 {
@@ -68,11 +70,17 @@ bool VarkLoadArchive( Vark& vark, const std::string& path, uint32_t flags = 0 );
 void VarkCloseArchive( Vark& vark );
 
 // Decompress a file from the archive into a vector of bytes.
+
 bool VarkDecompressFile( Vark& vark, const std::string& file, std::vector< uint8_t >& data );
+
+// Partially decompress a sharded file from the archive into a vector of bytes. Returns false if the file is not sharded.
+bool VarkDecompressFileSharded( Vark& vark, const std::string& file, uint64_t offset, uint64_t size, std::vector< uint8_t >& data );
 
 // Compress a file and append it to the archive.
 // flags: VARK_COMPRESS_SHARDED (0x1) - Experimental sharded compression
 bool VarkCompressAppendFile( Vark& vark, const std::string& file, uint32_t flags = 0 );
+
+// ---------------------------------------------------- Implementation ----------------------------------------------------
 
 #ifdef VARK_IMPLEMENTATION
 
@@ -430,6 +438,131 @@ bool VarkDecompressFile( Vark& vark, const std::string& file, std::vector< uint8
 error1:
     if ( ownFP && fp ) fclose( fp );
 error0:
+    return false;
+}
+
+bool VarkDecompressFileSharded( Vark& vark, const std::string& file, uint64_t offset, uint64_t size, std::vector< uint8_t >& data )
+{
+    if ( vark.flags & VARK_WRITE ) return false;
+    if ( size == 0 ) { data.clear(); return true; }
+
+    auto it = vark.fileLookup.find( std::filesystem::path( file ).generic_string<char>() );
+    if ( it == vark.fileLookup.end() ) return false;
+    const VarkFile* entry = &vark.files[it->second];
+
+    if ( entry->shardSize == 0 ) return false;
+
+    uint32_t shardCount = 0;
+    uint64_t totalUncompressedSize = 0;
+    const uint64_t* pOffsets = nullptr;
+    const uint8_t* pDataStart = nullptr;
+
+    FILE* fp = nullptr;
+    bool ownFP = false;
+
+    if ( ( vark.flags & VARK_MMAP ) && vark.mmapHandle )
+    {
+        mio::mmap_source* mmap = ( mio::mmap_source* ) vark.mmapHandle;
+        if ( !mmap->is_open() ) return false;
+
+        const uint8_t* ptr = ( const uint8_t* ) mmap->data() + entry->offset;
+        if ( memcmp( ptr, "VSHF", 4 ) != 0 ) return false;
+        ptr += 4;
+
+        memcpy( &shardCount, ptr, 4 ); ptr += 4;
+        memcpy( &totalUncompressedSize, ptr, 8 ); ptr += 8;
+
+        if ( offset + size > totalUncompressedSize ) return false;
+
+        vark.tempShardBuffer.resize( shardCount + 1 );
+        memcpy( vark.tempShardBuffer.data(), ptr, ( shardCount + 1 ) * 8 );
+        pOffsets = vark.tempShardBuffer.data();
+        pDataStart = ptr + ( shardCount + 1 ) * 8;
+
+        uint32_t firstShard = ( uint32_t ) ( offset / entry->shardSize );
+        uint32_t lastShard = ( uint32_t ) ( ( offset + size - 1 ) / entry->shardSize );
+
+        data.resize( ( size_t ) size );
+        uint64_t targetWriteOffset = 0;
+
+        for ( uint32_t i = firstShard; i <= lastShard; ++i )
+        {
+            uint64_t shardStart = ( uint64_t ) i * entry->shardSize;
+            uint64_t shardEnd = ( std::min )( shardStart + entry->shardSize, totalUncompressedSize );
+            uint64_t intersectStart = ( std::max )( shardStart, offset );
+            uint64_t intersectEnd = ( std::min )( shardEnd, offset + size );
+            uint64_t bytesToCopy = intersectEnd - intersectStart;
+            uint64_t internalShardOffset = intersectStart - shardStart;
+
+            uint64_t cSize = pOffsets[i + 1] - pOffsets[i];
+            uint64_t uSize = shardEnd - shardStart;
+
+            vark.tempBuffer.resize( ( size_t ) uSize );
+            int res = lzav::lzav_decompress( pDataStart + pOffsets[i], vark.tempBuffer.data(), ( int ) cSize, ( int ) uSize );
+            if ( res < 0 || ( uint64_t ) res != uSize ) return false;
+
+            memcpy( data.data() + targetWriteOffset, vark.tempBuffer.data() + internalShardOffset, ( size_t ) bytesToCopy );
+            targetWriteOffset += bytesToCopy;
+        }
+        return true;
+    }
+    else
+    {
+        if ( ( vark.flags & VARK_PERSISTENT_FP ) && vark.fp ) fp = vark.fp;
+        else { fp = fopen( vark.path.string().c_str(), "rb" ); if ( !fp ) return false; ownFP = true; }
+
+        if ( VARK_FSEEK( fp, ( long long ) entry->offset, SEEK_SET ) != 0 ) goto error1;
+
+        char vshf[4];
+        if ( fread( vshf, 1, 4, fp ) != 4 || memcmp( vshf, "VSHF", 4 ) != 0 ) goto error1;
+        if ( fread( &shardCount, sizeof( shardCount ), 1, fp ) != 1 ) goto error1;
+        if ( fread( &totalUncompressedSize, sizeof( totalUncompressedSize ), 1, fp ) != 1 ) goto error1;
+
+        if ( offset + size > totalUncompressedSize ) goto error1;
+
+        vark.tempShardBuffer.resize( shardCount + 1 );
+        if ( fread( vark.tempShardBuffer.data(), sizeof( uint64_t ), shardCount + 1, fp ) != shardCount + 1 ) goto error1;
+        uint64_t dataStartPos = VARK_FTELL( fp );
+
+        uint32_t firstShard = ( uint32_t ) ( offset / entry->shardSize );
+        uint32_t lastShard = ( uint32_t ) ( ( offset + size - 1 ) / entry->shardSize );
+
+        data.resize( ( size_t ) size );
+        uint64_t targetWriteOffset = 0;
+
+        // Reuse a local buffer for compressed data to avoid frequent allocations
+        std::vector<uint8_t> compressedScratch;
+
+        for ( uint32_t i = firstShard; i <= lastShard; ++i )
+        {
+            uint64_t shardStart = ( uint64_t ) i * entry->shardSize;
+            uint64_t shardEnd = ( std::min )( shardStart + entry->shardSize, totalUncompressedSize );
+            uint64_t intersectStart = ( std::max )( shardStart, offset );
+            uint64_t intersectEnd = ( std::min )( shardEnd, offset + size );
+            uint64_t bytesToCopy = intersectEnd - intersectStart;
+            uint64_t internalShardOffset = intersectStart - shardStart;
+
+            uint64_t cSize = vark.tempShardBuffer[i + 1] - vark.tempShardBuffer[i];
+            uint64_t uSize = shardEnd - shardStart;
+
+            if ( VARK_FSEEK( fp, ( long long ) ( dataStartPos + vark.tempShardBuffer[i] ), SEEK_SET ) != 0 ) goto error1;
+            compressedScratch.resize( ( size_t ) cSize );
+            if ( fread( compressedScratch.data(), 1, ( size_t ) cSize, fp ) != cSize ) goto error1;
+
+            vark.tempBuffer.resize( ( size_t ) uSize );
+            int res = lzav::lzav_decompress( compressedScratch.data(), vark.tempBuffer.data(), ( int ) cSize, ( int ) uSize );
+            if ( res < 0 || ( uint64_t ) res != uSize ) goto error1;
+
+            memcpy( data.data() + targetWriteOffset, vark.tempBuffer.data() + internalShardOffset, ( size_t ) bytesToCopy );
+            targetWriteOffset += bytesToCopy;
+        }
+
+        if ( ownFP ) fclose( fp );
+        return true;
+    }
+
+error1:
+    if ( ownFP && fp ) fclose( fp );
     return false;
 }
 

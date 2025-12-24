@@ -484,7 +484,7 @@ UTEST( Vark, ShardedCompression )
     Vark varkLoaded;
     ASSERT_TRUE( VarkLoadArchive( varkLoaded, archivePath ) );
     ASSERT_EQ( (size_t)1, varkLoaded.files.size() );
-    ASSERT_EQ( (uint32_t)(1024 * 1024), varkLoaded.files[0].shardSize );
+    ASSERT_EQ( (uint32_t)VARK_DEFAULT_SHARD_SIZE, varkLoaded.files[0].shardSize );
 
     // 3. Decompress and Verify Data
     std::vector<uint8_t> originalData = ReadFileContent( largeFile );
@@ -506,6 +506,56 @@ UTEST( Vark, ShardedCompression )
     ASSERT_EQ( SimpleHash( originalData ), SimpleHash( decompressedDataMmap ) );
     VarkCloseArchive( varkMmap );
 
+    remove( archivePath.c_str() );
+}
+
+UTEST( Vark, PartialShardedDecompression )
+{
+    const std::string archivePath = "sharded_partial.vark";
+    const std::string largeFile = "tests/Apophysis-250901-101.png";
+    std::vector<uint8_t> originalData = ReadFileContent( largeFile );
+    ASSERT_GT( originalData.size(), ( size_t ) ( 512 * 1024 ) ); // Ensure it's big enough
+
+    // 1. Create Sharded Archive
+    Vark vark;
+    ASSERT_TRUE( VarkCreateArchive( vark, archivePath, VARK_WRITE ) );
+    ASSERT_TRUE( VarkCompressAppendFile( vark, largeFile, VARK_COMPRESS_SHARDED ) );
+    VarkCloseArchive( vark );
+
+    // 2. Test Partial Reads (Various offsets and sizes)
+    struct TestCase { uint64_t off; uint64_t size; };
+    std::vector<TestCase> cases = {
+        { 0, 100 },                     // Start of file
+        { 12345, 5000 },                // Middle of first shard
+        { 128 * 1024 - 10, 20 },        // Span across shard boundary
+        { 256 * 1024 + 50, 1000 },      // Entirely within second/third shard
+        { originalData.size() - 100, 100 } // End of file
+    };
+
+    Vark varkLoaded;
+    ASSERT_TRUE( VarkLoadArchive( varkLoaded, archivePath ) );
+
+    for ( const auto& c : cases )
+    {
+        std::vector<uint8_t> partial;
+        ASSERT_TRUE( VarkDecompressFileSharded( varkLoaded, largeFile, c.off, c.size, partial ) );
+        ASSERT_EQ( ( size_t ) c.size, partial.size() );
+        ASSERT_EQ( 0, memcmp( partial.data(), originalData.data() + c.off, ( size_t ) c.size ) );
+    }
+
+    // 3. Test with MMAP
+    Vark varkMmap;
+    ASSERT_TRUE( VarkLoadArchive( varkMmap, archivePath, VARK_MMAP ) );
+    for ( const auto& c : cases )
+    {
+        std::vector<uint8_t> partial;
+        ASSERT_TRUE( VarkDecompressFileSharded( varkMmap, largeFile, c.off, c.size, partial ) );
+        ASSERT_EQ( ( size_t ) c.size, partial.size() );
+        ASSERT_EQ( 0, memcmp( partial.data(), originalData.data() + c.off, ( size_t ) c.size ) );
+    }
+
+    VarkCloseArchive( varkLoaded );
+    VarkCloseArchive( varkMmap );
     remove( archivePath.c_str() );
 }
 
