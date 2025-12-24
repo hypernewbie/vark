@@ -1,7 +1,7 @@
 # Vark - Simple LZAV Archive
 
 [![build](https://github.com/hypernewbie/vark/actions/workflows/build.yml/badge.svg)](https://github.com/hypernewbie/vark/actions/workflows/build.yml)
-[![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/hypernewbie/vark/releases/download/v1.03/vark-windows-v1.03.zip) [![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/hypernewbie/vark/releases/download/v1.03/vark-linux-v1.03.zip) [![macOS](https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/hypernewbie/vark/releases/download/v1.03/vark-macos-v1.03.zip)
+[![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/hypernewbie/vark/releases/download/v1.04/vark-windows-v1.04.zip) [![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/hypernewbie/vark/releases/download/v1.04/vark-linux-v1.04.zip) [![macOS](https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/hypernewbie/vark/releases/download/v1.04/vark-macos-v1.04.zip)
 
 ### Load stuff at DDR2 RAM speed!
 
@@ -84,12 +84,31 @@ VarkCloseArchive( vark );
 
 ### CLI
 ```
-Usage:
-  vark -c <archive> <files...>  Create archive
-  vark -a <archive> <files...>  Append to archive
-  vark -x <archive>             Extract archive
-  vark -l <archive>             List archive contents
-  vark <archive>                Smart mode (Extract if .vark, Create/Append otherwise)
+Usage: vark [--help] [--version] [-c] [-cs] [-a] [-as] [-x] [-l] [-v] archive [files]...
+
+A minimal LZAV archive tool for fast compression and decompression. Supports sharded compression for efficient random access to large files. Use without flags for smart mode: extracts existing archives or creates new ones automatically.
+
+Positional arguments:
+  archive        archive file path 
+  files          input files or directories [nargs: 0 or more] 
+
+Optional arguments:
+  -h, --help     shows help message and exits 
+  -v, --version  prints version information and exits 
+  -c             Create archive 
+  -cs            Create archive (sharded compression) 
+  -a             Append to archive 
+  -as            Append to archive (sharded) 
+  -x             Extract archive 
+  -l             List archive contents 
+  -v             Verify archive integrity 
+
+Examples:
+  vark data.vark                    Extract archive (smart mode)
+  vark -c game.vark assets/         Create archive from directory
+  vark -cs textures.vark images/    Create with sharded compression
+  vark -a game.vark newfile.dat     Append file to existing archive
+  vark -l game.vark                 List archive contents
 ```
 ## Build
 
