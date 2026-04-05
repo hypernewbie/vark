@@ -82,6 +82,10 @@ bool VarkFileSize( Vark& vark, const std::string& file, uint64_t& outSize );
 // flags: VARK_COMPRESS_SHARDED (0x1) - Experimental sharded compression
 bool VarkCompressAppendFile( Vark& vark, const std::string& file, uint32_t flags = 0 );
 
+// Compress a file and append it to the archive under a specified archive path.
+// flags: VARK_COMPRESS_SHARDED (0x1) - Experimental sharded compression
+bool VarkCompressAppendFileAs( Vark& vark, const std::string& sourceFile, const std::string& archivePath, uint32_t flags = 0 );
+
 // ---------------------------------------------------- Implementation ----------------------------------------------------
 
 #ifdef VARK_IMPLEMENTATION
@@ -567,7 +571,7 @@ bool VarkFileSize( Vark& vark, const std::string& file, uint64_t& outSize )
     }
 }
 
-bool VarkCompressAppendFile( Vark& vark, const std::string& file, uint32_t flags )
+bool VarkCompressAppendFileAs( Vark& vark, const std::string& sourceFile, const std::string& archivePath, uint32_t flags )
 {
     VarkFile newFile;
     long long srcLen = 0;
@@ -581,7 +585,7 @@ bool VarkCompressAppendFile( Vark& vark, const std::string& file, uint32_t flags
     // Read source file
     std::vector< uint8_t > srcData;
     {
-        VarkFP srcFp( fopen( file.c_str(), "rb" ), true );
+        VarkFP srcFp( fopen( sourceFile.c_str(), "rb" ), true );
         if ( !srcFp ) return false;
 
         VARK_FSEEK( srcFp, 0, SEEK_END );
@@ -594,7 +598,7 @@ bool VarkCompressAppendFile( Vark& vark, const std::string& file, uint32_t flags
             if ( fread( srcData.data(), 1, (size_t)srcLen, srcFp ) != (size_t)srcLen ) return false;
         }
     } // srcFp closes automatically here
-    
+
     VarkFP fp = VarkAcquireWriteFP( vark );
     if ( !fp ) return false;
 
@@ -603,7 +607,7 @@ bool VarkCompressAppendFile( Vark& vark, const std::string& file, uint32_t flags
     if ( VARK_FSEEK( fp, (long long)tableOffset, SEEK_SET ) != 0 ) return false;
 
     newFile.offset = tableOffset;
-    newFile.path = file;
+    newFile.path = archivePath;
     newFile.hash = VarkHash( srcData.data(), (size_t)srcLen );
 
     if ( flags & VARK_COMPRESS_SHARDED )
@@ -687,6 +691,11 @@ bool VarkCompressAppendFile( Vark& vark, const std::string& file, uint32_t flags
     vark.size = (uint64_t)VARK_FTELL( fp );
 
     return true;
+}
+
+bool VarkCompressAppendFile( Vark& vark, const std::string& file, uint32_t flags )
+{
+    return VarkCompressAppendFileAs( vark, file, file, flags );
 }
 
 #endif // VARK_IMPLEMENTATION

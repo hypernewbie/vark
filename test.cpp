@@ -1043,4 +1043,144 @@ UTEST( Vark, PerfShardedSequential )
     ASSERT_TRUE( RunShardedPerfTest( "Sequential_256KB", "tests/Apophysis-250901-101.png", false ) );
 }
 
+// ----- VarkCompressAppendFileAs tests -----
+// These verify the library stores archive paths exactly as given.
+// Path sanitisation is the caller's responsibility.
+
+UTEST( Vark, AppendFileAs_BasicRename )
+{
+    const std::string archive = "appendas_basic.vark";
+    const std::string srcFile = "tests/alice_in_wonderland.txt";
+    const std::string archName = "renamed/alice.txt";
+
+    std::vector<uint8_t> originalData = ReadFileContent( srcFile );
+    ASSERT_GT( originalData.size(), 0 );
+    uint32_t originalHash = SimpleHash( originalData );
+
+    Vark vark;
+    ASSERT_TRUE( VarkCreateArchive( vark, archive, VARK_WRITE ) );
+    ASSERT_TRUE( VarkCompressAppendFileAs( vark, srcFile, archName ) );
+    VarkCloseArchive( vark );
+
+    Vark varkLoaded;
+    ASSERT_TRUE( VarkLoadArchive( varkLoaded, archive ) );
+    ASSERT_EQ( ( size_t ) 1, varkLoaded.files.size() );
+
+    // Must be retrievable by the archive name, not the source path
+    std::vector<uint8_t> decompressed;
+    ASSERT_TRUE( VarkDecompressFile( varkLoaded, archName, decompressed ) );
+    ASSERT_EQ( originalHash, SimpleHash( decompressed ) );
+
+    // Source path must NOT exist in the archive
+    std::vector<uint8_t> dummy;
+    ASSERT_FALSE( VarkDecompressFile( varkLoaded, srcFile, dummy ) );
+
+    VarkCloseArchive( varkLoaded );
+    remove( archive.c_str() );
+}
+
+UTEST( Vark, AppendFileAs_DotDotPreserved )
+{
+    const std::string archive = "appendas_dotdot.vark";
+    const std::string srcFile = "tests/alice_in_wonderland.txt";
+    const std::string archName = "../textures/../assets/foo.txt";
+
+    Vark vark;
+    ASSERT_TRUE( VarkCreateArchive( vark, archive, VARK_WRITE ) );
+    ASSERT_TRUE( VarkCompressAppendFileAs( vark, srcFile, archName ) );
+    VarkCloseArchive( vark );
+
+    Vark varkLoaded;
+    ASSERT_TRUE( VarkLoadArchive( varkLoaded, archive ) );
+
+    // The .. components must survive round-trip, not get resolved
+    std::vector<uint8_t> decompressed;
+    ASSERT_TRUE( VarkDecompressFile( varkLoaded, archName, decompressed ) );
+    ASSERT_GT( decompressed.size(), 0 );
+
+    // A "resolved" version of the path must NOT match
+    std::vector<uint8_t> dummy;
+    ASSERT_FALSE( VarkDecompressFile( varkLoaded, "assets/foo.txt", dummy ) );
+
+    VarkCloseArchive( varkLoaded );
+    remove( archive.c_str() );
+}
+
+UTEST( Vark, AppendFileAs_CasePreserved )
+{
+    const std::string archive = "appendas_case.vark";
+    const std::string srcFile = "tests/alice_in_wonderland.txt";
+
+    Vark vark;
+    ASSERT_TRUE( VarkCreateArchive( vark, archive, VARK_WRITE ) );
+    ASSERT_TRUE( VarkCompressAppendFileAs( vark, srcFile, "Textures/Foo.PNG" ) );
+    ASSERT_TRUE( VarkCompressAppendFileAs( vark, srcFile, "textures/foo.png" ) );
+    VarkCloseArchive( vark );
+
+    Vark varkLoaded;
+    ASSERT_TRUE( VarkLoadArchive( varkLoaded, archive ) );
+
+    // Both entries must exist as separate files
+    ASSERT_EQ( ( size_t ) 2, varkLoaded.files.size() );
+
+    std::vector<uint8_t> data1, data2;
+    ASSERT_TRUE( VarkDecompressFile( varkLoaded, "Textures/Foo.PNG", data1 ) );
+    ASSERT_TRUE( VarkDecompressFile( varkLoaded, "textures/foo.png", data2 ) );
+
+    VarkCloseArchive( varkLoaded );
+    remove( archive.c_str() );
+}
+
+UTEST( Vark, AppendFileAs_AbsoluteStylePath )
+{
+    const std::string archive = "appendas_abs.vark";
+    const std::string srcFile = "tests/alice_in_wonderland.txt";
+    const std::string archName = "/assets/texture.png";
+
+    Vark vark;
+    ASSERT_TRUE( VarkCreateArchive( vark, archive, VARK_WRITE ) );
+    ASSERT_TRUE( VarkCompressAppendFileAs( vark, srcFile, archName ) );
+    VarkCloseArchive( vark );
+
+    Vark varkLoaded;
+    ASSERT_TRUE( VarkLoadArchive( varkLoaded, archive ) );
+
+    std::vector<uint8_t> decompressed;
+    ASSERT_TRUE( VarkDecompressFile( varkLoaded, archName, decompressed ) );
+    ASSERT_GT( decompressed.size(), 0 );
+
+    // Without the leading slash must NOT match
+    std::vector<uint8_t> dummy;
+    ASSERT_FALSE( VarkDecompressFile( varkLoaded, "assets/texture.png", dummy ) );
+
+    VarkCloseArchive( varkLoaded );
+    remove( archive.c_str() );
+}
+
+UTEST( Vark, AppendFileAs_ShardedRename )
+{
+    const std::string archive = "appendas_shard.vark";
+    const std::string srcFile = "tests/swoosh_1.wav";
+    const std::string archName = "audio/swoosh.wav";
+
+    std::vector<uint8_t> originalData = ReadFileContent( srcFile );
+    ASSERT_GT( originalData.size(), 0 );
+    uint32_t originalHash = SimpleHash( originalData );
+
+    Vark vark;
+    ASSERT_TRUE( VarkCreateArchive( vark, archive, VARK_WRITE ) );
+    ASSERT_TRUE( VarkCompressAppendFileAs( vark, srcFile, archName, VARK_COMPRESS_SHARDED ) );
+    VarkCloseArchive( vark );
+
+    Vark varkLoaded;
+    ASSERT_TRUE( VarkLoadArchive( varkLoaded, archive ) );
+
+    std::vector<uint8_t> decompressed;
+    ASSERT_TRUE( VarkDecompressFile( varkLoaded, archName, decompressed ) );
+    ASSERT_EQ( originalHash, SimpleHash( decompressed ) );
+
+    VarkCloseArchive( varkLoaded );
+    remove( archive.c_str() );
+}
+
 UTEST_MAIN()
